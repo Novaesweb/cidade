@@ -1,122 +1,300 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import {
+  GRID_SIZE,
+  RESERVED_CELL_COUNT,
+  isReservedCell,
+  type BuildType,
+  type BuildingPlacement,
+} from "./components/cityBuilderConfig";
+import "./App.css";
 
-function App() {
-  const [count, setCount] = useState(0)
+const STORAGE_KEY = "cidade-builder-placements-v1";
+const CityBuilderScene = lazy(() =>
+  import("./components/CityBuilderScene").then((module) => ({
+    default: module.CityBuilderScene,
+  })),
+);
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+const BUILDING_CATALOG: Record<
+  BuildType,
+  {
+    label: string;
+    description: string;
+    cost: number;
+    income: number;
+    energy: number;
+    population: number;
+  }
+> = {
+  house: {
+    label: "Casa",
+    description: "Expande bairros e aumenta a população trabalhadora.",
+    cost: 80,
+    income: 12,
+    energy: -2,
+    population: 6,
+  },
+  road: {
+    label: "Estrada",
+    description: "Liga setores e melhora o fluxo entre os lotes.",
+    cost: 25,
+    income: 0,
+    energy: 0,
+    population: 0,
+  },
+  factory: {
+    label: "Fábrica",
+    description: "Produz recursos e impulsiona a economia da cidade.",
+    cost: 160,
+    income: 36,
+    energy: -8,
+    population: 0,
+  },
+};
 
-      <div className="ticks"></div>
+function loadSavedPlacements() {
+  if (typeof window === "undefined") {
+    return [];
+  }
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+  try {
+    const rawValue = window.localStorage.getItem(STORAGE_KEY);
+    if (!rawValue) {
+      return [];
+    }
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+    const parsed = JSON.parse(rawValue) as BuildingPlacement[];
+    return parsed.filter(
+      (placement) =>
+        placement.x >= 0 &&
+        placement.x < GRID_SIZE &&
+        placement.z >= 0 &&
+        placement.z < GRID_SIZE &&
+        !isReservedCell(placement.x, placement.z),
+    );
+  } catch {
+    return [];
+  }
 }
 
-export default App
+function App() {
+  const [selectedTool, setSelectedTool] = useState<BuildType>("house");
+  const [placements, setPlacements] = useState<BuildingPlacement[]>(loadSavedPlacements);
+  const [lastAction, setLastAction] = useState(
+    "Escolha uma peça no painel e clique no grid para expandir sua cidade.",
+  );
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(placements));
+  }, [placements]);
+
+  const resources = useMemo(() => {
+    const houses = placements.filter((placement) => placement.type === "house").length;
+    const roads = placements.filter((placement) => placement.type === "road").length;
+    const factories = placements.filter((placement) => placement.type === "factory").length;
+    const totalCells = GRID_SIZE * GRID_SIZE - RESERVED_CELL_COUNT;
+    const occupiedCells = placements.length;
+    const freeLots = totalCells - occupiedCells;
+
+    return {
+      houses,
+      roads,
+      factories,
+      population: houses * BUILDING_CATALOG.house.population,
+      treasury:
+        1200 +
+        houses * BUILDING_CATALOG.house.income +
+        factories * BUILDING_CATALOG.factory.income,
+      energy:
+        90 +
+        houses * BUILDING_CATALOG.house.energy +
+        factories * BUILDING_CATALOG.factory.energy,
+      freeLots,
+      occupancy: Math.round((occupiedCells / totalCells) * 100),
+    };
+  }, [placements]);
+
+  const selectedCard = BUILDING_CATALOG[selectedTool];
+
+  const handlePlaceBuilding = (x: number, z: number) => {
+    if (isReservedCell(x, z)) {
+      setLastAction("Esse lote já faz parte da infraestrutura inicial do mapa.");
+      return;
+    }
+
+    setPlacements((currentPlacements) => {
+      const existingPlacement = currentPlacements.find(
+        (placement) => placement.x === x && placement.z === z,
+      );
+
+      if (existingPlacement?.type === selectedTool) {
+        setLastAction(
+          `${selectedCard.label} já posicionada em ${x + 1}:${z + 1}. Escolha outro lote.`,
+        );
+        return currentPlacements;
+      }
+
+      const nextPlacement = { x, z, type: selectedTool };
+      const withoutCurrentCell = currentPlacements.filter(
+        (placement) => placement.x !== x || placement.z !== z,
+      );
+
+      setLastAction(
+        `${selectedCard.label} colocada no lote ${x + 1}:${z + 1}. Setor pronto para crescer.`,
+      );
+
+      return [...withoutCurrentCell, nextPlacement];
+    });
+  };
+
+  const handleResetMap = () => {
+    setPlacements([]);
+    setLastAction("As construções do jogador foram removidas. O terreno voltou a ficar livre.");
+  };
+
+  return (
+    <div className="app-shell">
+      <header className="app-header">
+        <div>
+          <p className="eyebrow">Planejamento Urbano</p>
+          <h1>Nova Aurora</h1>
+          <p className="intro">
+            Um protótipo leve de city builder com mapa low poly, grid de construção e
+            persistência local.
+          </p>
+        </div>
+        <div className="summary-chip">
+          <span>Ocupação atual</span>
+          <strong>{resources.occupancy}% do grid</strong>
+        </div>
+      </header>
+
+      <main className="app-layout">
+        <section className="scene-panel">
+          <div className="scene-panel__bar">
+            <div>
+              <h2>Mapa 3D</h2>
+              <p>Arraste para girar, use o scroll para zoom e clique nos lotes para construir.</p>
+            </div>
+            <span className="scene-tag">Grid {GRID_SIZE} x {GRID_SIZE}</span>
+          </div>
+
+          <Suspense
+            fallback={
+              <div className="scene-fallback">
+                <strong>Preparando o mapa 3D...</strong>
+                <span>Carregando terreno, grid e ferramentas de construção.</span>
+              </div>
+            }
+          >
+            <CityBuilderScene
+              placements={placements}
+              selectedTool={selectedTool}
+              onPlaceBuilding={handlePlaceBuilding}
+            />
+          </Suspense>
+        </section>
+
+        <aside className="sidebar">
+          <section className="sidebar-card">
+            <div className="sidebar-card__header">
+              <h2>Ferramentas</h2>
+              <button type="button" className="ghost-button" onClick={handleResetMap}>
+                Limpar mapa
+              </button>
+            </div>
+
+            <div className="tool-grid">
+              {(Object.keys(BUILDING_CATALOG) as BuildType[]).map((tool) => {
+                const item = BUILDING_CATALOG[tool];
+                return (
+                  <button
+                    key={tool}
+                    type="button"
+                    className={`tool-button${selectedTool === tool ? " is-active" : ""}`}
+                    onClick={() => setSelectedTool(tool)}
+                  >
+                    <span>{item.label}</span>
+                    <small>Custo {item.cost}</small>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="selection-card">
+              <h3>{selectedCard.label}</h3>
+              <p>{selectedCard.description}</p>
+              <dl className="selection-stats">
+                <div>
+                  <dt>Custo</dt>
+                  <dd>{selectedCard.cost}</dd>
+                </div>
+                <div>
+                  <dt>Receita</dt>
+                  <dd>{selectedCard.income >= 0 ? `+${selectedCard.income}` : selectedCard.income}</dd>
+                </div>
+                <div>
+                  <dt>Energia</dt>
+                  <dd>{selectedCard.energy}</dd>
+                </div>
+                <div>
+                  <dt>População</dt>
+                  <dd>{selectedCard.population}</dd>
+                </div>
+              </dl>
+            </div>
+          </section>
+
+          <section className="sidebar-card">
+            <h2>Recursos da cidade</h2>
+            <div className="resource-grid">
+              <article>
+                <span>Casas</span>
+                <strong>{resources.houses}</strong>
+              </article>
+              <article>
+                <span>Estradas</span>
+                <strong>{resources.roads}</strong>
+              </article>
+              <article>
+                <span>Fábricas</span>
+                <strong>{resources.factories}</strong>
+              </article>
+              <article>
+                <span>Terreno livre</span>
+                <strong>{resources.freeLots}</strong>
+              </article>
+              <article>
+                <span>População</span>
+                <strong>{resources.population}</strong>
+              </article>
+              <article>
+                <span>Tesouro</span>
+                <strong>{resources.treasury}</strong>
+              </article>
+              <article>
+                <span>Energia</span>
+                <strong>{resources.energy}</strong>
+              </article>
+              <article>
+                <span>Construções</span>
+                <strong>{placements.length}</strong>
+              </article>
+            </div>
+          </section>
+
+          <section className="sidebar-card">
+            <h2>Status</h2>
+            <p className="status-copy">{lastAction}</p>
+            <p className="status-note">
+              As construções do jogador ficam salvas no navegador enquanto este dispositivo
+              continuar usando este projeto.
+            </p>
+          </section>
+        </aside>
+      </main>
+    </div>
+  );
+}
+
+export default App;

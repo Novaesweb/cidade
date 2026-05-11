@@ -1,0 +1,335 @@
+import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
+import { Canvas, type ThreeEvent } from "@react-three/fiber";
+import { useMemo, useState } from "react";
+import {
+  BUILD_AREA_SIZE,
+  CELL_SIZE,
+  FIXED_HOUSES,
+  FIXED_ROADS,
+  GRID_SIZE,
+  HALF_GRID,
+  LAMP_POSTS,
+  TREES,
+  toWorld,
+  type BuildType,
+  type BuildingPlacement,
+} from "./cityBuilderConfig";
+
+type CityBuilderSceneProps = {
+  placements: BuildingPlacement[];
+  selectedTool: BuildType;
+  onPlaceBuilding: (x: number, z: number) => void;
+};
+
+function RoadTile({ x, z }: { x: number; z: number }) {
+  return (
+    <group position={[toWorld(x), 0.03, toWorld(z)]}>
+      <mesh receiveShadow>
+        <boxGeometry args={[CELL_SIZE * 0.96, 0.08, CELL_SIZE * 0.96]} />
+        <meshStandardMaterial color="#475569" roughness={0.95} />
+      </mesh>
+      <mesh position={[0, 0.05, 0]}>
+        <boxGeometry args={[CELL_SIZE * 0.16, 0.01, CELL_SIZE * 0.76]} />
+        <meshStandardMaterial color="#f8fafc" emissive="#f8fafc" emissiveIntensity={0.15} />
+      </mesh>
+    </group>
+  );
+}
+
+function HouseModel({
+  position,
+  tint = "#f97316",
+}: {
+  position: [number, number, number];
+  tint?: string;
+}) {
+  return (
+    <group position={position}>
+      <mesh castShadow receiveShadow position={[0, 0.55, 0]}>
+        <boxGeometry args={[1.15, 1.1, 1.15]} />
+        <meshStandardMaterial color={tint} roughness={0.9} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0, 1.3, 0]} rotation={[0, Math.PI / 4, 0]}>
+        <coneGeometry args={[0.95, 0.8, 4]} />
+        <meshStandardMaterial color="#7c2d12" roughness={0.8} />
+      </mesh>
+      <mesh castShadow position={[0.28, 0.45, 0.58]}>
+        <boxGeometry args={[0.18, 0.38, 0.08]} />
+        <meshStandardMaterial color="#f8fafc" />
+      </mesh>
+    </group>
+  );
+}
+
+function FactoryModel({ position }: { position: [number, number, number] }) {
+  return (
+    <group position={position}>
+      <mesh castShadow receiveShadow position={[0, 0.52, 0]}>
+        <boxGeometry args={[1.45, 1.05, 1.2]} />
+        <meshStandardMaterial color="#cbd5e1" roughness={0.95} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0.3, 1.18, -0.15]}>
+        <boxGeometry args={[0.55, 0.35, 0.65]} />
+        <meshStandardMaterial color="#94a3b8" roughness={0.85} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[-0.46, 1.2, 0.26]}>
+        <cylinderGeometry args={[0.16, 0.2, 1.55, 8]} />
+        <meshStandardMaterial color="#64748b" roughness={0.7} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[-0.46, 2.02, 0.26]}>
+        <coneGeometry args={[0.14, 0.24, 8]} />
+        <meshStandardMaterial color="#f59e0b" emissive="#f97316" emissiveIntensity={0.4} />
+      </mesh>
+    </group>
+  );
+}
+
+function TreeModel({ position }: { position: [number, number, number] }) {
+  return (
+    <group position={position}>
+      <mesh castShadow receiveShadow position={[0, 0.38, 0]}>
+        <cylinderGeometry args={[0.12, 0.16, 0.76, 8]} />
+        <meshStandardMaterial color="#7c4a22" roughness={1} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0, 1.08, 0]}>
+        <coneGeometry args={[0.72, 1.4, 7]} />
+        <meshStandardMaterial color="#22c55e" roughness={0.95} />
+      </mesh>
+    </group>
+  );
+}
+
+function LampPostModel({ position }: { position: [number, number, number] }) {
+  return (
+    <group position={position}>
+      <mesh castShadow receiveShadow position={[0, 0.72, 0]}>
+        <cylinderGeometry args={[0.05, 0.06, 1.44, 8]} />
+        <meshStandardMaterial color="#cbd5e1" metalness={0.45} roughness={0.5} />
+      </mesh>
+      <mesh castShadow position={[0, 1.52, 0]}>
+        <sphereGeometry args={[0.12, 12, 12]} />
+        <meshStandardMaterial color="#fde68a" emissive="#fde68a" emissiveIntensity={1.35} />
+      </mesh>
+    </group>
+  );
+}
+
+function Terrain() {
+  return (
+    <>
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]}>
+        <planeGeometry args={[BUILD_AREA_SIZE + 16, BUILD_AREA_SIZE + 16]} />
+        <meshStandardMaterial color="#365314" roughness={1} />
+      </mesh>
+
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]}>
+        <planeGeometry args={[BUILD_AREA_SIZE + 5, BUILD_AREA_SIZE + 5]} />
+        <meshStandardMaterial color="#4d7c0f" roughness={1} />
+      </mesh>
+
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0.15, 0]} position={[-8, -0.01, -7]}>
+        <planeGeometry args={[10, 7]} />
+        <meshStandardMaterial color="#7c5a36" roughness={1} />
+      </mesh>
+
+      <mesh receiveShadow rotation={[-Math.PI / 2, -0.3, 0]} position={[9, -0.01, 8]}>
+        <planeGeometry args={[8, 5]} />
+        <meshStandardMaterial color="#8b6b45" roughness={1} />
+      </mesh>
+
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
+        <planeGeometry args={[BUILD_AREA_SIZE, BUILD_AREA_SIZE]} />
+        <meshStandardMaterial color="#5f7c34" roughness={0.98} />
+      </mesh>
+    </>
+  );
+}
+
+type BuildSurfaceProps = {
+  hoveredCell: { x: number; z: number } | null;
+  onHoverChange: (cell: { x: number; z: number } | null) => void;
+  onPlaceBuilding: (x: number, z: number) => void;
+  selectedTool: BuildType;
+};
+
+function BuildSurface({
+  hoveredCell,
+  onHoverChange,
+  onPlaceBuilding,
+  selectedTool,
+}: BuildSurfaceProps) {
+  const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
+    const x = Math.floor((event.point.x + HALF_GRID) / CELL_SIZE);
+    const z = Math.floor((event.point.z + HALF_GRID) / CELL_SIZE);
+
+    if (x < 0 || x >= GRID_SIZE || z < 0 || z >= GRID_SIZE) {
+      onHoverChange(null);
+      return;
+    }
+
+    onHoverChange({ x, z });
+  };
+
+  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    const x = Math.floor((event.point.x + HALF_GRID) / CELL_SIZE);
+    const z = Math.floor((event.point.z + HALF_GRID) / CELL_SIZE);
+
+    if (x < 0 || x >= GRID_SIZE || z < 0 || z >= GRID_SIZE) return;
+    onPlaceBuilding(x, z);
+  };
+
+  const hoverColor =
+    selectedTool === "house"
+      ? "#fb923c"
+      : selectedTool === "road"
+        ? "#cbd5e1"
+        : "#93c5fd";
+
+  return (
+    <>
+      <gridHelper
+        args={[BUILD_AREA_SIZE, GRID_SIZE, "#1e293b", "#3f6212"]}
+        position={[0, 0.02, 0]}
+      />
+
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.05, 0]}
+        onPointerMove={handlePointerMove}
+        onPointerOut={() => onHoverChange(null)}
+        onClick={handleClick}
+      >
+        <planeGeometry args={[BUILD_AREA_SIZE, BUILD_AREA_SIZE]} />
+        <meshBasicMaterial transparent opacity={0} />
+      </mesh>
+
+      {hoveredCell && (
+        <mesh position={[toWorld(hoveredCell.x), 0.08, toWorld(hoveredCell.z)]}>
+          <boxGeometry args={[CELL_SIZE * 0.94, 0.06, CELL_SIZE * 0.94]} />
+          <meshStandardMaterial color={hoverColor} transparent opacity={0.45} />
+        </mesh>
+      )}
+    </>
+  );
+}
+
+function PlacedBuilding({ placement }: { placement: BuildingPlacement }) {
+  const position: [number, number, number] = [toWorld(placement.x), 0, toWorld(placement.z)];
+
+  if (placement.type === "road") {
+    return <RoadTile x={placement.x} z={placement.z} />;
+  }
+
+  if (placement.type === "factory") {
+    return <FactoryModel position={position} />;
+  }
+
+  return <HouseModel position={position} tint="#f59e0b" />;
+}
+
+function SceneWorld({
+  placements,
+  selectedTool,
+  onPlaceBuilding,
+}: Omit<CityBuilderSceneProps, "selectedTool"> & { selectedTool: BuildType }) {
+  const [hoveredCell, setHoveredCell] = useState<{ x: number; z: number } | null>(null);
+
+  const roadTiles = useMemo(
+    () =>
+      FIXED_ROADS.map((road) => (
+        <RoadTile key={`road-${road.x}-${road.z}`} x={road.x} z={road.z} />
+      )),
+    [],
+  );
+
+  return (
+    <>
+      <color attach="background" args={["#8ec5ff"]} />
+      <fog attach="fog" args={["#8ec5ff", 36, 78]} />
+      <ambientLight intensity={1.2} />
+      <hemisphereLight intensity={0.75} groundColor="#365314" color="#fef3c7" />
+      <directionalLight
+        castShadow
+        intensity={1.8}
+        position={[18, 24, 12]}
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+        shadow-camera-left={-24}
+        shadow-camera-right={24}
+        shadow-camera-top={24}
+        shadow-camera-bottom={-24}
+      />
+
+      <PerspectiveCamera makeDefault position={[20, 26, 20]} fov={42} />
+      <OrbitControls
+        enablePan={true}
+        enableDamping
+        dampingFactor={0.08}
+        minDistance={18}
+        maxDistance={56}
+        minPolarAngle={0.6}
+        maxPolarAngle={1.35}
+        target={[0, 0, 0]}
+      />
+
+      <Terrain />
+      {roadTiles}
+
+      {FIXED_HOUSES.map((house) => (
+        <HouseModel
+          key={`fixed-house-${house.x}-${house.z}`}
+          position={[toWorld(house.x), 0, toWorld(house.z)]}
+          tint={house.tint}
+        />
+      ))}
+
+      {TREES.map((tree) => (
+        <TreeModel
+          key={`tree-${tree.x}-${tree.z}`}
+          position={[toWorld(tree.x), 0, toWorld(tree.z)]}
+        />
+      ))}
+
+      {LAMP_POSTS.map((lamp) => (
+        <LampPostModel
+          key={`lamp-${lamp.x}-${lamp.z}`}
+          position={[toWorld(lamp.x), 0, toWorld(lamp.z)]}
+        />
+      ))}
+
+      <FactoryModel position={[toWorld(1), 0, toWorld(5)]} />
+
+      {placements.map((placement) => (
+        <PlacedBuilding
+          key={`${placement.type}-${placement.x}-${placement.z}`}
+          placement={placement}
+        />
+      ))}
+
+      <BuildSurface
+        hoveredCell={hoveredCell}
+        onHoverChange={setHoveredCell}
+        onPlaceBuilding={onPlaceBuilding}
+        selectedTool={selectedTool}
+      />
+    </>
+  );
+}
+
+export function CityBuilderScene({
+  placements,
+  selectedTool,
+  onPlaceBuilding,
+}: CityBuilderSceneProps) {
+  return (
+    <div className="scene-shell">
+      <Canvas shadows dpr={[1, 1.5]} gl={{ antialias: true }}>
+        <SceneWorld
+          placements={placements}
+          selectedTool={selectedTool}
+          onPlaceBuilding={onPlaceBuilding}
+        />
+      </Canvas>
+    </div>
+  );
+}
