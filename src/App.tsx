@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import {
+  FIXED_ROADS,
   GRID_SIZE,
   RESERVED_CELL_COUNT,
   isReservedCell,
@@ -32,6 +33,17 @@ type BuildingSpec = {
   population: number;
   appeal: number;
   palette: Palette;
+  requiresRoadAccess: boolean;
+};
+
+type TurnLogEntry = {
+  turn: number;
+  title: string;
+  summary: string;
+  kind: "good" | "warning" | "neutral";
+  fundsDelta: number;
+  prestigeDelta: number;
+  stabilityDelta: number;
 };
 
 type CitySnapshot = {
@@ -39,6 +51,9 @@ type CitySnapshot = {
   funds: number;
   turn: number;
   cityName: string;
+  prestige: number;
+  stability: number;
+  turnLog: TurnLogEntry[];
 };
 
 type SaveSlot = {
@@ -58,10 +73,19 @@ type UiPrefs = {
   toolSearch: string;
 };
 
-const STORAGE_KEY = "cidade-builder-state-v4";
-const PREFS_KEY = "cidade-builder-prefs-v2";
-const SLOTS_KEY = "cidade-builder-slots-v1";
+type Objective = {
+  label: string;
+  current: number;
+  target: number;
+  complete: boolean;
+};
+
+const STORAGE_KEY = "cidade-builder-state-v5";
+const PREFS_KEY = "cidade-builder-prefs-v3";
+const SLOTS_KEY = "cidade-builder-slots-v2";
 const STARTING_FUNDS = 1400;
+const STARTING_PRESTIGE = 34;
+const STARTING_STABILITY = 68;
 const BASE_TURN_INCOME = 18;
 const REFUND_RATE = 0.65;
 
@@ -82,6 +106,7 @@ const BUILDING_CATALOG: Record<BuildType, BuildingSpec> = {
     population: 6,
     appeal: 4,
     palette: "urban",
+    requiresRoadAccess: true,
   },
   road: {
     label: "Estrada",
@@ -93,6 +118,7 @@ const BUILDING_CATALOG: Record<BuildType, BuildingSpec> = {
     population: 0,
     appeal: 1,
     palette: "urban",
+    requiresRoadAccess: false,
   },
   factory: {
     label: "Fabrica",
@@ -104,6 +130,7 @@ const BUILDING_CATALOG: Record<BuildType, BuildingSpec> = {
     population: 0,
     appeal: -3,
     palette: "urban",
+    requiresRoadAccess: true,
   },
   townCenter: {
     label: "Town Center",
@@ -115,6 +142,7 @@ const BUILDING_CATALOG: Record<BuildType, BuildingSpec> = {
     population: 12,
     appeal: 8,
     palette: "fantasy",
+    requiresRoadAccess: true,
   },
   market: {
     label: "Mercado",
@@ -126,6 +154,7 @@ const BUILDING_CATALOG: Record<BuildType, BuildingSpec> = {
     population: 2,
     appeal: 6,
     palette: "fantasy",
+    requiresRoadAccess: true,
   },
   barracks: {
     label: "Quartel",
@@ -137,6 +166,7 @@ const BUILDING_CATALOG: Record<BuildType, BuildingSpec> = {
     population: 3,
     appeal: 2,
     palette: "fantasy",
+    requiresRoadAccess: true,
   },
   watchTower: {
     label: "Torre",
@@ -148,6 +178,7 @@ const BUILDING_CATALOG: Record<BuildType, BuildingSpec> = {
     population: 1,
     appeal: 2,
     palette: "fantasy",
+    requiresRoadAccess: false,
   },
   windmill: {
     label: "Moinho",
@@ -159,6 +190,7 @@ const BUILDING_CATALOG: Record<BuildType, BuildingSpec> = {
     population: 2,
     appeal: 7,
     palette: "fantasy",
+    requiresRoadAccess: false,
   },
   temple: {
     label: "Templo",
@@ -170,6 +202,7 @@ const BUILDING_CATALOG: Record<BuildType, BuildingSpec> = {
     population: 4,
     appeal: 9,
     palette: "fantasy",
+    requiresRoadAccess: true,
   },
   farm: {
     label: "Fazenda",
@@ -181,6 +214,7 @@ const BUILDING_CATALOG: Record<BuildType, BuildingSpec> = {
     population: 2,
     appeal: 5,
     palette: "fantasy",
+    requiresRoadAccess: false,
   },
 };
 
@@ -211,7 +245,7 @@ const TEMPLATE_PRESETS: Array<{
   {
     id: "balanced",
     label: "Distrito misto",
-    description: "Casas, um mercado e producao leve para comecar rapido.",
+    description: "Casas, mercado e producao leve para comecar rapido.",
     placements: [
       { x: 10, z: 2, type: "house" },
       { x: 11, z: 2, type: "house" },
@@ -226,7 +260,7 @@ const TEMPLATE_PRESETS: Array<{
   {
     id: "citadel",
     label: "Citadela",
-    description: "Nucleo fantasy com defesa e marcos maiores.",
+    description: "Nucleo fantasy com defesa, fe e marcos maiores.",
     placements: [
       { x: 9, z: 12, type: "watchTower" },
       { x: 10, z: 12, type: "townCenter" },
@@ -240,7 +274,7 @@ const TEMPLATE_PRESETS: Array<{
   {
     id: "industrial",
     label: "Parque fabril",
-    description: "Expansao moderna com estradas e renda forte.",
+    description: "Expansao moderna com estradas e renda mais forte.",
     placements: [
       { x: 13, z: 0, type: "road" },
       { x: 14, z: 0, type: "factory" },
@@ -284,7 +318,20 @@ const DEFAULT_CITY_STATE: CitySnapshot = {
   funds: STARTING_FUNDS,
   turn: 1,
   cityName: "Nova Aurora",
+  prestige: STARTING_PRESTIGE,
+  stability: STARTING_STABILITY,
+  turnLog: [],
 };
+
+const FIXED_ROAD_KEYS = new Set(FIXED_ROADS.map((road) => `${road.x}:${road.z}`));
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function getPlacementKey(x: number, z: number) {
+  return `${x}:${z}`;
+}
 
 function sanitizePlacements(input: unknown): BuildingPlacement[] {
   if (!Array.isArray(input)) {
@@ -310,15 +357,64 @@ function sanitizePlacements(input: unknown): BuildingPlacement[] {
   });
 }
 
+function sanitizeTurnLog(input: unknown): TurnLogEntry[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .filter((entry): entry is TurnLogEntry => {
+      if (!entry || typeof entry !== "object") {
+        return false;
+      }
+
+      const candidate = entry as Partial<TurnLogEntry>;
+      return (
+        typeof candidate.turn === "number" &&
+        typeof candidate.title === "string" &&
+        typeof candidate.summary === "string" &&
+        typeof candidate.fundsDelta === "number" &&
+        typeof candidate.prestigeDelta === "number" &&
+        typeof candidate.stabilityDelta === "number" &&
+        (candidate.kind === "good" ||
+          candidate.kind === "warning" ||
+          candidate.kind === "neutral")
+      );
+    })
+    .slice(0, 8);
+}
+
 function clonePlacements(placements: BuildingPlacement[]) {
   return placements.map((placement) => ({ ...placement }));
+}
+
+function cloneTurnLog(turnLog: TurnLogEntry[]) {
+  return turnLog.map((entry) => ({ ...entry }));
 }
 
 function cloneSnapshot(snapshot: CitySnapshot): CitySnapshot {
   return {
     ...snapshot,
     placements: clonePlacements(snapshot.placements),
+    turnLog: cloneTurnLog(snapshot.turnLog),
   };
+}
+
+function hasRoadAccess(x: number, z: number, placements: BuildingPlacement[]) {
+  const roadKeys = new Set(FIXED_ROAD_KEYS);
+
+  placements.forEach((placement) => {
+    if (placement.type === "road") {
+      roadKeys.add(getPlacementKey(placement.x, placement.z));
+    }
+  });
+
+  return (
+    roadKeys.has(getPlacementKey(x + 1, z)) ||
+    roadKeys.has(getPlacementKey(x - 1, z)) ||
+    roadKeys.has(getPlacementKey(x, z + 1)) ||
+    roadKeys.has(getPlacementKey(x, z - 1))
+  );
 }
 
 function loadCityState(): CitySnapshot {
@@ -347,6 +443,15 @@ function loadCityState(): CitySnapshot {
         typeof parsed.cityName === "string" && parsed.cityName.trim().length > 0
           ? parsed.cityName
           : DEFAULT_CITY_STATE.cityName,
+      prestige:
+        typeof parsed.prestige === "number" && Number.isFinite(parsed.prestige)
+          ? clamp(parsed.prestige, 0, 100)
+          : STARTING_PRESTIGE,
+      stability:
+        typeof parsed.stability === "number" && Number.isFinite(parsed.stability)
+          ? clamp(parsed.stability, 0, 100)
+          : STARTING_STABILITY,
+      turnLog: sanitizeTurnLog(parsed.turnLog),
     };
   } catch {
     return DEFAULT_CITY_STATE;
@@ -425,6 +530,15 @@ function loadSaveSlots(): Partial<Record<SaveSlotId, SaveSlot>> {
             typeof slot.snapshot?.cityName === "string" && slot.snapshot.cityName.trim().length > 0
               ? slot.snapshot.cityName
               : DEFAULT_CITY_STATE.cityName,
+          prestige:
+            typeof slot.snapshot?.prestige === "number"
+              ? clamp(slot.snapshot.prestige, 0, 100)
+              : STARTING_PRESTIGE,
+          stability:
+            typeof slot.snapshot?.stability === "number"
+              ? clamp(slot.snapshot.stability, 0, 100)
+              : STARTING_STABILITY,
+          turnLog: sanitizeTurnLog(slot.snapshot?.turnLog),
         },
       };
     });
@@ -436,7 +550,7 @@ function loadSaveSlots(): Partial<Record<SaveSlotId, SaveSlot>> {
 }
 
 function computeMetrics(snapshot: CitySnapshot) {
-  const { placements, funds } = snapshot;
+  const { placements, funds, prestige, stability } = snapshot;
   const totalCells = GRID_SIZE * GRID_SIZE - RESERVED_CELL_COUNT;
   const occupiedCells = placements.length;
   const freeLots = totalCells - occupiedCells;
@@ -466,7 +580,7 @@ function computeMetrics(snapshot: CitySnapshot) {
   );
   const cityScore = Math.max(
     0,
-    Math.round(totalPopulation * 1.3 + netIncome * 1.8 + totalAppeal * 2 + freeLots * 0.35),
+    Math.round(totalPopulation * 1.2 + netIncome * 1.7 + totalAppeal * 1.8 + prestige * 1.6),
   );
   const developmentStage =
     occupiedCells < 8
@@ -484,7 +598,8 @@ function computeMetrics(snapshot: CitySnapshot) {
     ...(funds < 150 ? ["Seu caixa esta baixo para novas obras maiores."] : []),
     ...(netIncome < 0 ? ["O fluxo por turno esta negativo."] : []),
     ...(totalEnergy < 0 ? ["A energia entrou no vermelho e precisa de alivio."] : []),
-    ...(freeLots < 20 ? ["O grid livre esta encolhendo. Planeje novos vazios."] : []),
+    ...(prestige < 25 ? ["O prestigio da cidade esta fraco para uma capital memoravel."] : []),
+    ...(stability < 35 ? ["A estabilidade caiu demais e pode afetar o proximo ciclo."] : []),
   ];
 
   return {
@@ -500,6 +615,8 @@ function computeMetrics(snapshot: CitySnapshot) {
     totalEnergy,
     totalAppeal,
     cityScore,
+    prestige,
+    stability,
     developmentStage,
     economyStatus,
     energyStatus,
@@ -514,6 +631,125 @@ function computeMetrics(snapshot: CitySnapshot) {
       counts.farm,
     totalBuildings: occupiedCells,
   };
+}
+
+function createObjectives(snapshot: CitySnapshot) {
+  const metrics = computeMetrics(snapshot);
+
+  return [
+    {
+      label: "Chegar a 24 de populacao",
+      current: metrics.totalPopulation,
+      target: 24,
+      complete: metrics.totalPopulation >= 24,
+    },
+    {
+      label: "Gerar 60 por turno",
+      current: metrics.netIncome,
+      target: 60,
+      complete: metrics.netIncome >= 60,
+    },
+    {
+      label: "Prestigio 55",
+      current: snapshot.prestige,
+      target: 55,
+      complete: snapshot.prestige >= 55,
+    },
+    {
+      label: "Estabilidade 72",
+      current: snapshot.stability,
+      target: 72,
+      complete: snapshot.stability >= 72,
+    },
+    {
+      label: "6 estruturas RTS",
+      current: metrics.rtsStructures,
+      target: 6,
+      complete: metrics.rtsStructures >= 6,
+    },
+  ] satisfies Objective[];
+}
+
+function rollTurnEvent(snapshot: CitySnapshot) {
+  const metrics = computeMetrics(snapshot);
+  const candidates: Array<Omit<TurnLogEntry, "turn"> & { when: boolean }> = [
+    {
+      when: metrics.counts.farm + metrics.counts.windmill > 0,
+      title: "Feira da colheita",
+      summary: "O distrito rural puxou visitantes e aqueceu a economia.",
+      kind: "good",
+      fundsDelta: 60,
+      prestigeDelta: 2,
+      stabilityDelta: 1,
+    },
+    {
+      when: metrics.counts.factory > 0,
+      title: "Contrato industrial",
+      summary: "Uma encomenda grande reforcou o caixa, mas apertou a rotina das ruas.",
+      kind: "good",
+      fundsDelta: 85,
+      prestigeDelta: 0,
+      stabilityDelta: -2,
+    },
+    {
+      when: metrics.counts.market + metrics.counts.house >= 4,
+      title: "Semana comercial",
+      summary: "O fluxo de compradores girou mais rapido que o esperado.",
+      kind: "good",
+      fundsDelta: 48,
+      prestigeDelta: 1,
+      stabilityDelta: 0,
+    },
+    {
+      when: metrics.totalEnergy < 15,
+      title: "Pico de demanda",
+      summary: "A rede sentiu a pressao e forçou manutencao extra.",
+      kind: "warning",
+      fundsDelta: -70,
+      prestigeDelta: -1,
+      stabilityDelta: -5,
+    },
+    {
+      when: metrics.rtsStructures >= 3,
+      title: "Desfile civico",
+      summary: "Os marcos principais deram cara de capital ao assentamento.",
+      kind: "good",
+      fundsDelta: 24,
+      prestigeDelta: 3,
+      stabilityDelta: 1,
+    },
+    {
+      when: metrics.netIncome < 0,
+      title: "Caixa pressionado",
+      summary: "Despesas extras reduziram o animo da equipe e o ritmo do caixa.",
+      kind: "warning",
+      fundsDelta: -36,
+      prestigeDelta: 0,
+      stabilityDelta: -3,
+    },
+    {
+      when: true,
+      title: "Turno de rotina",
+      summary: "A cidade atravessou o ciclo sem grandes sobressaltos.",
+      kind: "neutral",
+      fundsDelta: 0,
+      prestigeDelta: 1,
+      stabilityDelta: 1,
+    },
+  ];
+
+  const available = candidates.filter((candidate) => candidate.when);
+  const selected = available[(snapshot.turn + metrics.totalBuildings + metrics.cityScore) % available.length];
+
+  return {
+    turn: snapshot.turn + 1,
+    title: selected.title,
+    summary: selected.summary,
+    kind: selected.kind,
+    fundsDelta: selected.fundsDelta,
+    prestigeDelta: selected.prestigeDelta,
+    stabilityDelta: selected.stabilityDelta,
+  } satisfies TurnLogEntry;
 }
 
 function formatSavedAt(savedAt: string) {
@@ -531,7 +767,7 @@ function formatSavedAt(savedAt: string) {
 
 function GridOverview({ placements }: { placements: BuildingPlacement[] }) {
   const placementKeys = useMemo(
-    () => new Set(placements.map((placement) => `${placement.x}:${placement.z}`)),
+    () => new Set(placements.map((placement) => getPlacementKey(placement.x, placement.z))),
     [placements],
   );
 
@@ -540,7 +776,7 @@ function GridOverview({ placements }: { placements: BuildingPlacement[] }) {
       {Array.from({ length: GRID_SIZE * GRID_SIZE }, (_, index) => {
         const x = index % GRID_SIZE;
         const z = Math.floor(index / GRID_SIZE);
-        const key = `${x}:${z}`;
+        const key = getPlacementKey(x, z);
         const isPlaced = placementKeys.has(key);
         const isBlocked = isReservedCell(x, z);
 
@@ -573,6 +809,7 @@ function App() {
   const deferredToolSearch = useDeferredValue(toolSearch);
   const [selectedTool, setSelectedTool] = useState<BuildType>("house");
   const [history, setHistory] = useState<CitySnapshot[]>([]);
+  const [futureHistory, setFutureHistory] = useState<CitySnapshot[]>([]);
   const [hoveredCell, setHoveredCell] = useState<HoveredCell | null>(null);
   const [saveSlots, setSaveSlots] = useState<Partial<Record<SaveSlotId, SaveSlot>>>(initialSlots);
   const [importText, setImportText] = useState("");
@@ -580,10 +817,18 @@ function App() {
     "Escolha uma construcao no painel e clique no grid para expandir o mapa.",
   );
 
-  const { placements, funds, turn, cityName } = cityState;
+  const { placements, funds, turn, cityName, prestige, stability, turnLog } = cityState;
   const metrics = useMemo(() => computeMetrics(cityState), [cityState]);
+  const objectives = useMemo(() => createObjectives(cityState), [cityState]);
   const selectedCard = BUILDING_CATALOG[selectedTool];
-  const selectedAffordable = funds >= selectedCard.cost;
+  const selectedAffordable = useMemo(() => {
+    const bestRefund = placements.reduce((highestRefund, placement) => {
+      const refund = Math.round(BUILDING_CATALOG[placement.type].cost * REFUND_RATE);
+      return Math.max(highestRefund, refund);
+    }, 0);
+
+    return funds >= selectedCard.cost || funds + bestRefund >= selectedCard.cost;
+  }, [funds, placements, selectedCard.cost]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cityState));
@@ -626,6 +871,49 @@ function App() {
     }
   }, [activePalette, selectedTool]);
 
+  const pushHistory = (snapshot: CitySnapshot) => {
+    setHistory((currentHistory) => [...currentHistory, cloneSnapshot(snapshot)]);
+    setFutureHistory([]);
+  };
+
+  const applySnapshot = (snapshot: CitySnapshot, message: string) => {
+    startTransition(() => {
+      setCityState(cloneSnapshot(snapshot));
+      setHoveredCell(null);
+      setLastAction(message);
+    });
+  };
+
+  const handleUndoSnapshot = () => {
+    setHistory((currentHistory) => {
+      const previousSnapshot = currentHistory.at(-1);
+
+      if (!previousSnapshot) {
+        setLastAction("Nao ha uma acao recente para desfazer.");
+        return currentHistory;
+      }
+
+      setFutureHistory((currentFuture) => [...currentFuture, cloneSnapshot(cityState)]);
+      applySnapshot(previousSnapshot, "Ultima acao desfeita e cidade restaurada.");
+      return currentHistory.slice(0, -1);
+    });
+  };
+
+  const handleRedoSnapshot = () => {
+    setFutureHistory((currentFuture) => {
+      const nextSnapshot = currentFuture.at(-1);
+
+      if (!nextSnapshot) {
+        setLastAction("Nao ha uma acao recente para refazer.");
+        return currentFuture;
+      }
+
+      setHistory((currentHistory) => [...currentHistory, cloneSnapshot(cityState)]);
+      applySnapshot(nextSnapshot, "Acao refeita com sucesso.");
+      return currentFuture.slice(0, -1);
+    });
+  };
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) {
@@ -665,9 +953,15 @@ function App() {
         return;
       }
 
-      if ((event.ctrlKey || event.metaKey) && key === "z") {
+      if ((event.ctrlKey || event.metaKey) && key === "z" && !event.shiftKey) {
         event.preventDefault();
         handleUndoSnapshot();
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && (key === "y" || (key === "z" && event.shiftKey))) {
+        event.preventDefault();
+        handleRedoSnapshot();
         return;
       }
 
@@ -682,7 +976,28 @@ function App() {
       }
 
       if (key === "enter") {
-        handleAdvanceTurn();
+        setCityState((currentState) => {
+          const currentMetrics = computeMetrics(currentState);
+          const eventInfo = rollTurnEvent(currentState);
+          const prestigeDelta = eventInfo.prestigeDelta + (currentMetrics.totalAppeal > 18 ? 1 : 0);
+          const stabilityDelta =
+            eventInfo.stabilityDelta +
+            (currentMetrics.totalEnergy < 0 ? -4 : currentMetrics.netIncome < 0 ? -2 : 1);
+
+          pushHistory(currentState);
+          setLastAction(
+            `Turno ${currentState.turn + 1} iniciado. Evento: ${eventInfo.title}. Caixa ${currentState.funds + currentMetrics.netIncome + eventInfo.fundsDelta}.`,
+          );
+
+          return {
+            ...currentState,
+            turn: currentState.turn + 1,
+            funds: currentState.funds + currentMetrics.netIncome + eventInfo.fundsDelta,
+            prestige: clamp(currentState.prestige + prestigeDelta, 0, 100),
+            stability: clamp(currentState.stability + stabilityDelta, 0, 100),
+            turnLog: [eventInfo, ...currentState.turnLog].slice(0, 8),
+          };
+        });
       }
     };
 
@@ -718,28 +1033,93 @@ function App() {
     );
   }, [hoveredCell, placements]);
 
-  const pushHistory = (snapshot: CitySnapshot) => {
-    setHistory((currentHistory) => [...currentHistory, cloneSnapshot(snapshot)]);
-  };
+  const hoveredIsReserved = useMemo(() => {
+    if (!hoveredCell) {
+      return false;
+    }
 
-  const applySnapshot = (snapshot: CitySnapshot, message: string) => {
-    startTransition(() => {
-      setCityState(cloneSnapshot(snapshot));
-      setLastAction(message);
-    });
-  };
+    return isReservedCell(hoveredCell.x, hoveredCell.z);
+  }, [hoveredCell]);
 
-  const handleUndoSnapshot = () => {
-    setHistory((currentHistory) => {
-      const previousSnapshot = currentHistory.at(-1);
+  const hoveredRoadAccess = useMemo(() => {
+    if (!hoveredCell) {
+      return false;
+    }
 
-      if (!previousSnapshot) {
-        setLastAction("Nao ha uma acao recente para desfazer.");
-        return currentHistory;
-      }
+    const placementsWithoutCurrent = placements.filter(
+      (placement) => placement.x !== hoveredCell.x || placement.z !== hoveredCell.z,
+    );
 
-      applySnapshot(previousSnapshot, "Ultima acao desfeita e cidade restaurada.");
-      return currentHistory.slice(0, -1);
+    return hasRoadAccess(hoveredCell.x, hoveredCell.z, placementsWithoutCurrent);
+  }, [hoveredCell, placements]);
+
+  const replacementDelta = useMemo(() => {
+    if (!hoveredPlacement) {
+      return -selectedCard.cost;
+    }
+
+    return (
+      Math.round(BUILDING_CATALOG[hoveredPlacement.type].cost * REFUND_RATE) - selectedCard.cost
+    );
+  }, [hoveredPlacement, selectedCard.cost, hoveredPlacement?.type]);
+
+  const hoveredRefund = useMemo(() => {
+    if (!hoveredPlacement) {
+      return 0;
+    }
+
+    return Math.round(BUILDING_CATALOG[hoveredPlacement.type].cost * REFUND_RATE);
+  }, [hoveredPlacement]);
+
+  const hoveredCanBuild = useMemo(() => {
+    if (!hoveredCell || hoveredIsReserved) {
+      return false;
+    }
+
+    if (hoveredPlacement?.type === selectedTool) {
+      return false;
+    }
+
+    const effectiveFunds = funds + hoveredRefund;
+    if (effectiveFunds < selectedCard.cost) {
+      return false;
+    }
+
+    return !selectedCard.requiresRoadAccess || hoveredRoadAccess;
+  }, [
+    funds,
+    hoveredCell,
+    hoveredIsReserved,
+    hoveredPlacement,
+    hoveredRefund,
+    hoveredRoadAccess,
+    selectedCard.cost,
+    selectedCard.requiresRoadAccess,
+    selectedTool,
+  ]);
+
+  const handleAdvanceTurn = () => {
+    setCityState((currentState) => {
+      const currentMetrics = computeMetrics(currentState);
+      const eventInfo = rollTurnEvent(currentState);
+      const prestigeDelta = eventInfo.prestigeDelta + (currentMetrics.totalAppeal > 18 ? 1 : 0);
+      const stabilityDelta =
+        eventInfo.stabilityDelta +
+        (currentMetrics.totalEnergy < 0 ? -4 : currentMetrics.netIncome < 0 ? -2 : 1);
+
+      pushHistory(currentState);
+      setLastAction(
+        `Turno ${currentState.turn + 1} iniciado. Evento: ${eventInfo.title}. Caixa ${currentState.funds + currentMetrics.netIncome + eventInfo.fundsDelta}.`,
+      );
+
+      return {
+        ...currentState,
+        turn: currentState.turn + 1,
+        funds: currentState.funds + currentMetrics.netIncome + eventInfo.fundsDelta,
+        prestige: clamp(currentState.prestige + prestigeDelta, 0, 100),
+        stability: clamp(currentState.stability + stabilityDelta, 0, 100),
+        turnLog: [eventInfo, ...currentState.turnLog].slice(0, 8),
+      };
     });
   };
 
@@ -782,16 +1162,12 @@ function App() {
       return;
     }
 
-    if (funds < selectedCard.cost) {
-      setLastAction(
-        `Faltam ${selectedCard.cost - funds} para construir ${selectedCard.label}.`,
-      );
-      return;
-    }
-
     setCityState((currentState) => {
       const existingPlacement = currentState.placements.find(
         (placement) => placement.x === x && placement.z === z,
+      );
+      const placementsWithoutCurrent = currentState.placements.filter(
+        (placement) => placement.x !== x || placement.z !== z,
       );
 
       if (existingPlacement?.type === selectedTool) {
@@ -801,20 +1177,28 @@ function App() {
         return currentState;
       }
 
+      if (
+        selectedCard.requiresRoadAccess &&
+        !hasRoadAccess(x, z, placementsWithoutCurrent)
+      ) {
+        setLastAction(`${selectedCard.label} precisa ficar ao lado de uma estrada.`);
+        return currentState;
+      }
+
       let fundsDelta = -selectedCard.cost;
       if (existingPlacement) {
         fundsDelta += Math.round(BUILDING_CATALOG[existingPlacement.type].cost * REFUND_RATE);
       }
 
       if (currentState.funds + fundsDelta < 0) {
-        setLastAction("A troca desse lote ainda nao cabe no caixa atual.");
+        const shortage = Math.abs(currentState.funds + fundsDelta);
+        setLastAction(
+          existingPlacement
+            ? `A troca desse lote ainda precisa de ${shortage} no caixa.`
+            : `Faltam ${shortage} para construir ${selectedCard.label}.`,
+        );
         return currentState;
       }
-
-      const nextPlacement = { x, z, type: selectedTool };
-      const withoutCurrentCell = currentState.placements.filter(
-        (placement) => placement.x !== x || placement.z !== z,
-      );
 
       pushHistory(currentState);
       setLastAction(
@@ -823,24 +1207,8 @@ function App() {
 
       return {
         ...currentState,
-        placements: [...withoutCurrentCell, nextPlacement],
+        placements: [...placementsWithoutCurrent, { x, z, type: selectedTool }],
         funds: currentState.funds + fundsDelta,
-      };
-    });
-  };
-
-  const handleAdvanceTurn = () => {
-    setCityState((currentState) => {
-      const currentMetrics = computeMetrics(currentState);
-      pushHistory(currentState);
-      setLastAction(
-        `Turno ${currentState.turn + 1} iniciado. Caixa mudou em ${currentMetrics.netIncome}.`,
-      );
-
-      return {
-        ...currentState,
-        turn: currentState.turn + 1,
-        funds: currentState.funds + currentMetrics.netIncome,
       };
     });
   };
@@ -861,10 +1229,16 @@ function App() {
       placements: filteredPlacements,
       funds: Math.max(STARTING_FUNDS - spent, 260),
       turn: 1,
+      prestige: STARTING_PRESTIGE,
+      stability: STARTING_STABILITY,
+      turnLog: [],
     };
 
     pushHistory(cityState);
-    applySnapshot(nextState, `Template ${template.label} aplicado com ${filteredPlacements.length} lotes.`);
+    applySnapshot(
+      nextState,
+      `Template ${template.label} aplicado com ${filteredPlacements.length} lotes.`,
+    );
   };
 
   const handleSaveSlot = (slotId: SaveSlotId) => {
@@ -892,10 +1266,19 @@ function App() {
     applySnapshot(slot.snapshot, `Slot ${slotId} carregado: ${slot.name}.`);
   };
 
+  const handleDeleteSlot = (slotId: SaveSlotId) => {
+    setSaveSlots((currentSlots) => {
+      const nextSlots = { ...currentSlots };
+      delete nextSlots[slotId];
+      return nextSlots;
+    });
+    setLastAction(`Slot ${slotId} apagado.`);
+  };
+
   const handleResetCity = () => {
-    pushHistory(cityState);
-    applySnapshot(DEFAULT_CITY_STATE, "Cidade reiniciada para um novo ciclo.");
     setHistory([]);
+    setFutureHistory([]);
+    applySnapshot(DEFAULT_CITY_STATE, "Cidade reiniciada para um novo ciclo.");
   };
 
   const handleResetMap = () => {
@@ -908,9 +1291,32 @@ function App() {
     setCityState((currentState) => ({
       ...currentState,
       placements: [],
-      funds: currentState.funds,
     }));
     setLastAction("As construcoes do jogador foram limpas e o terreno voltou ao estado inicial.");
+  };
+
+  const handleClearSelectedType = () => {
+    const placementsOfType = placements.filter((placement) => placement.type === selectedTool);
+
+    if (placementsOfType.length === 0) {
+      setLastAction(`Nao existem construcoes do tipo ${selectedCard.label} no mapa.`);
+      return;
+    }
+
+    const refund = placementsOfType.reduce(
+      (sum, placement) => sum + Math.round(BUILDING_CATALOG[placement.type].cost * REFUND_RATE),
+      0,
+    );
+
+    pushHistory(cityState);
+    setCityState((currentState) => ({
+      ...currentState,
+      placements: currentState.placements.filter((placement) => placement.type !== selectedTool),
+      funds: currentState.funds + refund,
+    }));
+    setLastAction(
+      `${placementsOfType.length} lote(s) do tipo ${selectedCard.label} removidos. Reembolso ${refund}.`,
+    );
   };
 
   const handleExportJson = async () => {
@@ -946,6 +1352,15 @@ function App() {
               typeof parsed.cityName === "string" && parsed.cityName.trim().length > 0
                 ? parsed.cityName
                 : cityState.cityName,
+            prestige:
+              typeof parsed.prestige === "number"
+                ? clamp(parsed.prestige, 0, 100)
+                : cityState.prestige,
+            stability:
+              typeof parsed.stability === "number"
+                ? clamp(parsed.stability, 0, 100)
+                : cityState.stability,
+            turnLog: sanitizeTurnLog(parsed.turnLog),
           };
 
       pushHistory(cityState);
@@ -972,8 +1387,8 @@ function App() {
             aria-label="Nome da cidade"
           />
           <p className="intro">
-            Mapa 3D aberto com economia real, paletas separadas, camera ajustavel e varios fluxos
-            de edicao para construir sem perder a vista.
+            Mapa 3D aberto com economia real, templates, saves locais, filtros, hover por lote e
+            mais ferramentas para o seu sandbox virar um city builder jogavel.
           </p>
         </div>
         <div className="summary-stack">
@@ -984,6 +1399,14 @@ function App() {
           <div className="summary-chip">
             <span>Caixa</span>
             <strong>{funds}</strong>
+          </div>
+          <div className="summary-chip">
+            <span>Prestigio</span>
+            <strong>{prestige}</strong>
+          </div>
+          <div className="summary-chip">
+            <span>Estabilidade</span>
+            <strong>{stability}</strong>
           </div>
           <button type="button" className="primary-button" onClick={handleAdvanceTurn}>
             Avancar turno
@@ -1056,12 +1479,18 @@ function App() {
               placements={placements}
               selectedTool={selectedTool}
               onPlaceBuilding={handlePlaceBuilding}
+              hoveredCell={hoveredCell}
               onHoverCellChange={setHoveredCell}
               showDecorations={showDecorations}
               showGrid={showGrid}
               viewMode={viewMode}
               interactionMode={interactionMode}
               canPlaceSelected={selectedAffordable}
+              hoverCanBuild={hoveredCanBuild}
+              hoverHasPlacement={Boolean(hoveredPlacement)}
+              hoverIsReserved={hoveredIsReserved}
+              hoverRoadAccess={hoveredRoadAccess}
+              requiresRoadAccessSelected={selectedCard.requiresRoadAccess}
             />
           </Suspense>
         </section>
@@ -1079,8 +1508,16 @@ function App() {
                 >
                   Desfazer
                 </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={handleRedoSnapshot}
+                  disabled={futureHistory.length === 0}
+                >
+                  Refazer
+                </button>
                 <button type="button" className="ghost-button" onClick={handleResetMap}>
-                  Limpar
+                  Limpar mapa
                 </button>
                 <button type="button" className="ghost-button" onClick={handleResetCity}>
                   Nova cidade
@@ -1184,11 +1621,19 @@ function App() {
                   <dd>{interactionMode === "erase" ? "limpa" : selectedCard.appeal}</dd>
                 </div>
               </dl>
-              {interactionMode === "build" && !selectedAffordable && (
-                <p className="warning-copy">
-                  Caixa insuficiente. Faltam {selectedCard.cost - funds} para esta obra.
-                </p>
+              {interactionMode === "build" && (
+                <div className="selection-meta">
+                  <span>
+                    Acesso viario {selectedCard.requiresRoadAccess ? "necessario" : "livre"}
+                  </span>
+                  <span>{selectedAffordable ? "Caixa suficiente" : "Caixa insuficiente"}</span>
+                </div>
               )}
+              <div className="sidebar-actions">
+                <button type="button" className="ghost-button" onClick={handleClearSelectedType}>
+                  Limpar tipo
+                </button>
+              </div>
             </div>
           </section>
 
@@ -1207,6 +1652,19 @@ function App() {
                       : "Lote livre para edicao."
                   : "O painel mostra coordenada, uso atual e contexto do lote."}
               </span>
+              {hoveredCell && !isReservedCell(hoveredCell.x, hoveredCell.z) && (
+                <span>
+                  {interactionMode === "erase"
+                    ? hoveredPlacement
+                      ? `Reembolso estimado ${Math.round(BUILDING_CATALOG[hoveredPlacement.type].cost * REFUND_RATE)}.`
+                      : "Nada para remover neste lote."
+                    : selectedCard.requiresRoadAccess
+                      ? hoveredRoadAccess
+                        ? "Acesso viario disponivel."
+                        : "Sem estrada adjacente para essa obra."
+                      : `Troca prevista ${replacementDelta >= 0 ? `+${replacementDelta}` : replacementDelta}.`}
+                </span>
+              )}
             </div>
           </section>
 
@@ -1224,6 +1682,31 @@ function App() {
                   <span>{template.description}</span>
                 </button>
               ))}
+            </div>
+          </section>
+
+          <section className="sidebar-card">
+            <h2>Objetivos</h2>
+            <div className="objective-list">
+              {objectives.map((objective) => {
+                const progress = clamp((objective.current / objective.target) * 100, 0, 100);
+                return (
+                  <article key={objective.label} className="objective-card">
+                    <div className="objective-card__row">
+                      <strong>{objective.label}</strong>
+                      <span>
+                        {objective.current}/{objective.target}
+                      </span>
+                    </div>
+                    <div className="progress-track">
+                      <div
+                        className={`progress-fill${objective.complete ? " is-complete" : ""}`}
+                        style={{ width: `${progress}%` }}
+                      ></div>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </section>
 
@@ -1253,6 +1736,14 @@ function App() {
                         disabled={!slot}
                       >
                         Carregar
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => handleDeleteSlot(slotId)}
+                        disabled={!slot}
+                      >
+                        Apagar
                       </button>
                     </div>
                   </article>
@@ -1387,6 +1878,29 @@ function App() {
           </section>
 
           <section className="sidebar-card">
+            <h2>Eventos recentes</h2>
+            <div className="event-log">
+              {turnLog.length > 0 ? (
+                turnLog.map((entry) => (
+                  <article key={`${entry.turn}-${entry.title}`} className={`event-log__item is-${entry.kind}`}>
+                    <strong>
+                      Turno {entry.turn}: {entry.title}
+                    </strong>
+                    <span>{entry.summary}</span>
+                    <small>
+                      Caixa {entry.fundsDelta >= 0 ? `+${entry.fundsDelta}` : entry.fundsDelta} ·
+                      Prestigio {entry.prestigeDelta >= 0 ? ` +${entry.prestigeDelta}` : ` ${entry.prestigeDelta}`} ·
+                      Estabilidade {entry.stabilityDelta >= 0 ? ` +${entry.stabilityDelta}` : ` ${entry.stabilityDelta}`}
+                    </small>
+                  </article>
+                ))
+              ) : (
+                <div className="empty-message">Os eventos vao aparecer conforme os turnos avancarem.</div>
+              )}
+            </div>
+          </section>
+
+          <section className="sidebar-card">
             <h2>Atalhos</h2>
             <div className="shortcut-list">
               <span>
@@ -1416,6 +1930,9 @@ function App() {
               <span>
                 <kbd>Ctrl</kbd> + <kbd>Z</kbd> desfaz
               </span>
+              <span>
+                <kbd>Ctrl</kbd> + <kbd>Y</kbd> refaz
+              </span>
             </div>
           </section>
 
@@ -1426,7 +1943,7 @@ function App() {
               As construcoes ficam salvas no navegador. Use a paleta urbana para densidade rapida
               e a fantasy RTS para marcos maiores no terreno.
             </p>
-            <p className="status-note">Acoes disponiveis para desfazer: {history.length}</p>
+            <p className="status-note">Acoes para desfazer: {history.length} · para refazer: {futureHistory.length}</p>
           </section>
         </aside>
       </main>

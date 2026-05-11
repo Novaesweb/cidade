@@ -1,6 +1,6 @@
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import { Canvas, type ThreeEvent } from "@react-three/fiber";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { FantasyBuildModel } from "./FantasyBuildModels";
 import {
   BUILD_AREA_SIZE,
@@ -23,12 +23,18 @@ type CityBuilderSceneProps = {
   placements: BuildingPlacement[];
   selectedTool: BuildType;
   onPlaceBuilding: (x: number, z: number) => void;
+  hoveredCell: HoveredCell | null;
   onHoverCellChange: (cell: HoveredCell | null) => void;
   showDecorations: boolean;
   showGrid: boolean;
   viewMode: ViewMode;
   interactionMode: InteractionMode;
   canPlaceSelected: boolean;
+  hoverCanBuild: boolean;
+  hoverHasPlacement: boolean;
+  hoverIsReserved: boolean;
+  hoverRoadAccess: boolean;
+  requiresRoadAccessSelected: boolean;
 };
 
 function RoadTile({ x, z }: { x: number; z: number }) {
@@ -134,6 +140,11 @@ type BuildSurfaceProps = {
   interactionMode: InteractionMode;
   occupiedCellKeys: Set<string>;
   canPlaceSelected: boolean;
+  hoverCanBuild: boolean;
+  hoverHasPlacement: boolean;
+  hoverIsReserved: boolean;
+  hoverRoadAccess: boolean;
+  requiresRoadAccessSelected: boolean;
 };
 
 function BuildSurface({
@@ -145,6 +156,11 @@ function BuildSurface({
   interactionMode,
   occupiedCellKeys,
   canPlaceSelected,
+  hoverCanBuild,
+  hoverHasPlacement,
+  hoverIsReserved,
+  hoverRoadAccess,
+  requiresRoadAccessSelected,
 }: BuildSurfaceProps) {
   const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
     const x = Math.floor((event.point.x + HALF_GRID) / CELL_SIZE);
@@ -170,21 +186,37 @@ function BuildSurface({
   };
 
   const hoveredKey = hoveredCell ? `${hoveredCell.x}:${hoveredCell.z}` : null;
-  const hasUserBuilding = hoveredKey ? occupiedCellKeys.has(hoveredKey) : false;
+  const hasUserBuilding = hoveredKey ? occupiedCellKeys.has(hoveredKey) : hoverHasPlacement;
+  const showReservedState =
+    Boolean(hoveredCell) && hoverIsReserved && interactionMode === "build";
   const hoverColor =
-    interactionMode === "erase"
+    showReservedState
+      ? "#64748b"
+      : interactionMode === "erase"
       ? hasUserBuilding
         ? "#f87171"
         : "#94a3b8"
+      : requiresRoadAccessSelected && hoveredCell && !hoverRoadAccess
+        ? "#f59e0b"
       : !canPlaceSelected
         ? "#f87171"
+        : hoveredCell && !hoverCanBuild
+          ? "#fca5a5"
         : selectedTool === "house"
           ? "#fb923c"
           : selectedTool === "road"
             ? "#cbd5e1"
             : "#93c5fd";
   const hoverOpacity =
-    interactionMode === "erase" && !hasUserBuilding ? 0.22 : !canPlaceSelected ? 0.28 : 0.45;
+    showReservedState
+      ? 0.35
+      : interactionMode === "erase" && !hasUserBuilding
+        ? 0.22
+        : hoveredCell && !hoverCanBuild
+          ? 0.32
+          : !canPlaceSelected
+            ? 0.28
+            : 0.45;
 
   return (
     <>
@@ -238,15 +270,19 @@ function SceneWorld({
   placements,
   selectedTool,
   onPlaceBuilding,
+  hoveredCell,
   onHoverCellChange,
   showDecorations,
   showGrid,
   viewMode,
   interactionMode,
   canPlaceSelected,
+  hoverCanBuild,
+  hoverHasPlacement,
+  hoverIsReserved,
+  hoverRoadAccess,
+  requiresRoadAccessSelected,
 }: CityBuilderSceneProps) {
-  const [hoveredCell, setHoveredCell] = useState<HoveredCell | null>(null);
-
   const roadTiles = useMemo(
     () =>
       FIXED_ROADS.map((road) => (
@@ -263,12 +299,12 @@ function SceneWorld({
   const cameraConfig =
     viewMode === "survey"
       ? {
-          position: [0, 42, 28] as [number, number, number],
-          fov: 33,
-          minDistance: 30,
-          maxDistance: 82,
-          minPolarAngle: 0.4,
-          maxPolarAngle: 0.92,
+          position: [0, 50, 34] as [number, number, number],
+          fov: 30,
+          minDistance: 32,
+          maxDistance: 92,
+          minPolarAngle: 0.34,
+          maxPolarAngle: 0.9,
           target: [0, 0, 0] as [number, number, number],
         }
       : {
@@ -280,11 +316,6 @@ function SceneWorld({
           maxPolarAngle: 1.15,
           target: [2, 0, 2] as [number, number, number],
         };
-
-  const handleHoverChange = (cell: HoveredCell | null) => {
-    setHoveredCell(cell);
-    onHoverCellChange(cell);
-  };
 
   return (
     <>
@@ -348,13 +379,18 @@ function SceneWorld({
 
       <BuildSurface
         hoveredCell={hoveredCell}
-        onHoverChange={handleHoverChange}
+        onHoverChange={onHoverCellChange}
         onPlaceBuilding={onPlaceBuilding}
         selectedTool={selectedTool}
         showGrid={showGrid}
         interactionMode={interactionMode}
         occupiedCellKeys={occupiedCellKeys}
         canPlaceSelected={canPlaceSelected}
+        hoverCanBuild={hoverCanBuild}
+        hoverHasPlacement={hoverHasPlacement}
+        hoverIsReserved={hoverIsReserved}
+        hoverRoadAccess={hoverRoadAccess}
+        requiresRoadAccessSelected={requiresRoadAccessSelected}
       />
     </>
   );
