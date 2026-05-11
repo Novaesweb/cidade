@@ -16,6 +16,7 @@ import {
 import { ImportedCityProps } from "./ImportedCityProps";
 
 type ViewMode = "survey" | "build";
+type InteractionMode = "build" | "erase";
 
 type CityBuilderSceneProps = {
   placements: BuildingPlacement[];
@@ -24,6 +25,7 @@ type CityBuilderSceneProps = {
   showDecorations: boolean;
   showGrid: boolean;
   viewMode: ViewMode;
+  interactionMode: InteractionMode;
 };
 
 function RoadTile({ x, z }: { x: number; z: number }) {
@@ -126,6 +128,8 @@ type BuildSurfaceProps = {
   onPlaceBuilding: (x: number, z: number) => void;
   selectedTool: BuildType;
   showGrid: boolean;
+  interactionMode: InteractionMode;
+  occupiedCellKeys: Set<string>;
 };
 
 function BuildSurface({
@@ -134,6 +138,8 @@ function BuildSurface({
   onPlaceBuilding,
   selectedTool,
   showGrid,
+  interactionMode,
+  occupiedCellKeys,
 }: BuildSurfaceProps) {
   const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
     const x = Math.floor((event.point.x + HALF_GRID) / CELL_SIZE);
@@ -158,12 +164,19 @@ function BuildSurface({
     onPlaceBuilding(x, z);
   };
 
+  const hoveredKey = hoveredCell ? `${hoveredCell.x}:${hoveredCell.z}` : null;
+  const hasUserBuilding = hoveredKey ? occupiedCellKeys.has(hoveredKey) : false;
   const hoverColor =
-    selectedTool === "house"
-      ? "#fb923c"
-      : selectedTool === "road"
-        ? "#cbd5e1"
-        : "#93c5fd";
+    interactionMode === "erase"
+      ? hasUserBuilding
+        ? "#f87171"
+        : "#94a3b8"
+      : selectedTool === "house"
+        ? "#fb923c"
+        : selectedTool === "road"
+          ? "#cbd5e1"
+          : "#93c5fd";
+  const hoverOpacity = interactionMode === "erase" && !hasUserBuilding ? 0.22 : 0.45;
 
   return (
     <>
@@ -188,7 +201,7 @@ function BuildSurface({
       {hoveredCell && (
         <mesh position={[toWorld(hoveredCell.x), 0.08, toWorld(hoveredCell.z)]}>
           <boxGeometry args={[CELL_SIZE * 0.94, 0.06, CELL_SIZE * 0.94]} />
-          <meshStandardMaterial color={hoverColor} transparent opacity={0.45} />
+          <meshStandardMaterial color={hoverColor} transparent opacity={hoverOpacity} />
         </mesh>
       )}
     </>
@@ -220,6 +233,7 @@ function SceneWorld({
   showDecorations,
   showGrid,
   viewMode,
+  interactionMode,
 }: CityBuilderSceneProps) {
   const [hoveredCell, setHoveredCell] = useState<{ x: number; z: number } | null>(null);
 
@@ -229,6 +243,11 @@ function SceneWorld({
         <RoadTile key={`road-${road.x}-${road.z}`} x={road.x} z={road.z} />
       )),
     [],
+  );
+
+  const occupiedCellKeys = useMemo(
+    () => new Set(placements.map((placement) => `${placement.x}:${placement.z}`)),
+    [placements],
   );
 
   const cameraConfig =
@@ -318,6 +337,8 @@ function SceneWorld({
         onPlaceBuilding={onPlaceBuilding}
         selectedTool={selectedTool}
         showGrid={showGrid}
+        interactionMode={interactionMode}
+        occupiedCellKeys={occupiedCellKeys}
       />
     </>
   );

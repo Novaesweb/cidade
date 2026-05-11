@@ -10,6 +10,7 @@ import "./App.css";
 
 type Palette = "urban" | "fantasy";
 type ViewMode = "survey" | "build";
+type InteractionMode = "build" | "erase";
 
 const STORAGE_KEY = "cidade-builder-placements-v2";
 const CityBuilderScene = lazy(() =>
@@ -195,6 +196,7 @@ function App() {
   const [selectedTool, setSelectedTool] = useState<BuildType>("house");
   const [activePalette, setActivePalette] = useState<Palette>("urban");
   const [viewMode, setViewMode] = useState<ViewMode>("survey");
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>("build");
   const [showDecorations, setShowDecorations] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
   const [history, setHistory] = useState<BuildingPlacement[][]>([]);
@@ -207,9 +209,85 @@ function App() {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(placements));
   }, [placements]);
 
+  useEffect(() => {
+    if (BUILDING_CATALOG[selectedTool].palette === activePalette) {
+      return;
+    }
+
+    const firstTool = TOOL_ORDER.find((tool) => BUILDING_CATALOG[tool].palette === activePalette);
+
+    if (firstTool) {
+      setSelectedTool(firstTool);
+    }
+  }, [activePalette, selectedTool]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName?.toLowerCase();
+      if (tagName === "input" || tagName === "textarea" || target?.isContentEditable) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+
+      if (key === "g") {
+        setShowGrid((currentValue) => !currentValue);
+        return;
+      }
+
+      if (key === "d") {
+        setShowDecorations((currentValue) => !currentValue);
+        return;
+      }
+
+      if (key === "v") {
+        setViewMode((currentValue) => (currentValue === "survey" ? "build" : "survey"));
+        return;
+      }
+
+      if (key === "x") {
+        setInteractionMode((currentValue) => (currentValue === "build" ? "erase" : "build"));
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && key === "z") {
+        event.preventDefault();
+        setHistory((currentHistory) => {
+          const previousPlacements = currentHistory.at(-1);
+
+          if (!previousPlacements) {
+            setLastAction("Nao ha uma acao recente para desfazer.");
+            return currentHistory;
+          }
+
+          setPlacements(previousPlacements);
+          setLastAction("Ultima construcao desfeita e mapa restaurado.");
+          return currentHistory.slice(0, -1);
+        });
+        return;
+      }
+
+      if (key === "1") {
+        setActivePalette("urban");
+        return;
+      }
+
+      if (key === "2") {
+        setActivePalette("fantasy");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const paletteTools = useMemo(
-    () =>
-      TOOL_ORDER.filter((tool) => BUILDING_CATALOG[tool].palette === activePalette),
+    () => TOOL_ORDER.filter((tool) => BUILDING_CATALOG[tool].palette === activePalette),
     [activePalette],
   );
 
@@ -235,6 +313,10 @@ function App() {
       (sum, placement) => sum + BUILDING_CATALOG[placement.type].energy,
       90,
     );
+    const economyStatus =
+      totalTreasury < 1260 ? "Baixa renda" : totalTreasury > 1460 ? "Expansao forte" : "Estavel";
+    const energyStatus =
+      totalEnergy < 70 ? "Pressao na energia" : totalEnergy > 100 ? "Folga de energia" : "Balanceada";
 
     return {
       counts,
@@ -243,6 +325,8 @@ function App() {
       totalPopulation,
       totalTreasury,
       totalEnergy,
+      economyStatus,
+      energyStatus,
       rtsStructures:
         counts.townCenter +
         counts.market +
@@ -257,19 +341,58 @@ function App() {
 
   const selectedCard = BUILDING_CATALOG[selectedTool];
 
+  const pushHistory = (snapshot: BuildingPlacement[]) => {
+    setHistory((currentHistory) => [...currentHistory, snapshot]);
+  };
+
   const handleSelectPalette = (palette: Palette) => {
     setActivePalette(palette);
+  };
 
-    if (BUILDING_CATALOG[selectedTool].palette !== palette) {
-      const firstTool = TOOL_ORDER.find((tool) => BUILDING_CATALOG[tool].palette === palette);
+  const handleUndoPlacement = () => {
+    setHistory((currentHistory) => {
+      const previousPlacements = currentHistory.at(-1);
 
-      if (firstTool) {
-        setSelectedTool(firstTool);
+      if (!previousPlacements) {
+        setLastAction("Nao ha uma acao recente para desfazer.");
+        return currentHistory;
       }
-    }
+
+      setPlacements(previousPlacements);
+      setLastAction("Ultima construcao desfeita e mapa restaurado.");
+      return currentHistory.slice(0, -1);
+    });
   };
 
   const handlePlaceBuilding = (x: number, z: number) => {
+    if (interactionMode === "erase") {
+      if (isReservedCell(x, z)) {
+        setLastAction("Esse lote faz parte do cenario base e nao pode ser apagado.");
+        return;
+      }
+
+      setPlacements((currentPlacements) => {
+        const existingPlacement = currentPlacements.find(
+          (placement) => placement.x === x && placement.z === z,
+        );
+
+        if (!existingPlacement) {
+          setLastAction("Nao existe uma construcao sua nesse lote para remover.");
+          return currentPlacements;
+        }
+
+        pushHistory(currentPlacements);
+        setLastAction(
+          `${BUILDING_CATALOG[existingPlacement.type].label} removida do lote ${x + 1}:${z + 1}.`,
+        );
+
+        return currentPlacements.filter(
+          (placement) => placement.x !== x || placement.z !== z,
+        );
+      });
+      return;
+    }
+
     if (isReservedCell(x, z)) {
       setLastAction("Esse lote ja esta ocupado pela infraestrutura do mapa.");
       return;
@@ -293,27 +416,12 @@ function App() {
       );
       const nextPlacements = [...withoutCurrentCell, nextPlacement];
 
-      setHistory((currentHistory) => [...currentHistory, currentPlacements]);
+      pushHistory(currentPlacements);
       setLastAction(
         `${selectedCard.label} colocada no lote ${x + 1}:${z + 1}. Vista liberada e area expandida.`,
       );
 
       return nextPlacements;
-    });
-  };
-
-  const handleUndoPlacement = () => {
-    setHistory((currentHistory) => {
-      const previousPlacements = currentHistory.at(-1);
-
-      if (!previousPlacements) {
-        setLastAction("Nao ha uma acao recente para desfazer.");
-        return currentHistory;
-      }
-
-      setPlacements(previousPlacements);
-      setLastAction("Ultima construcao desfeita e mapa restaurado.");
-      return currentHistory.slice(0, -1);
     });
   };
 
@@ -323,7 +431,7 @@ function App() {
       return;
     }
 
-    setHistory((currentHistory) => [...currentHistory, placements]);
+    pushHistory(placements);
     setPlacements([]);
     setLastAction("As construcoes do jogador foram limpas e o terreno voltou ao estado inicial.");
   };
@@ -406,6 +514,7 @@ function App() {
               showDecorations={showDecorations}
               showGrid={showGrid}
               viewMode={viewMode}
+              interactionMode={interactionMode}
             />
           </Suspense>
         </section>
@@ -442,6 +551,23 @@ function App() {
               ))}
             </div>
 
+            <div className="mode-switcher">
+              <button
+                type="button"
+                className={`mode-button${interactionMode === "build" ? " is-active" : ""}`}
+                onClick={() => setInteractionMode("build")}
+              >
+                Construir
+              </button>
+              <button
+                type="button"
+                className={`mode-button${interactionMode === "erase" ? " is-active is-danger" : ""}`}
+                onClick={() => setInteractionMode("erase")}
+              >
+                Apagar lote
+              </button>
+            </div>
+
             <div className="tool-grid">
               {paletteTools.map((tool) => {
                 const item = BUILDING_CATALOG[tool];
@@ -450,7 +576,10 @@ function App() {
                     key={tool}
                     type="button"
                     className={`tool-button${selectedTool === tool ? " is-active" : ""}`}
-                    onClick={() => setSelectedTool(tool)}
+                    onClick={() => {
+                      setInteractionMode("build");
+                      setSelectedTool(tool);
+                    }}
                   >
                     <span>{item.label}</span>
                     <small>Custo {item.cost}</small>
@@ -460,24 +589,34 @@ function App() {
             </div>
 
             <div className="selection-card">
-              <h3>{selectedCard.label}</h3>
-              <p>{selectedCard.description}</p>
+              <h3>{interactionMode === "erase" ? "Apagar lote" : selectedCard.label}</h3>
+              <p>
+                {interactionMode === "erase"
+                  ? "Remove apenas construcoes colocadas por voce. O cenario fixo continua protegido."
+                  : selectedCard.description}
+              </p>
               <dl className="selection-stats">
                 <div>
                   <dt>Custo</dt>
-                  <dd>{selectedCard.cost}</dd>
+                  <dd>{interactionMode === "erase" ? "0" : selectedCard.cost}</dd>
                 </div>
                 <div>
                   <dt>Receita</dt>
-                  <dd>{selectedCard.income >= 0 ? `+${selectedCard.income}` : selectedCard.income}</dd>
+                  <dd>
+                    {interactionMode === "erase"
+                      ? "libera"
+                      : selectedCard.income >= 0
+                        ? `+${selectedCard.income}`
+                        : selectedCard.income}
+                  </dd>
                 </div>
                 <div>
                   <dt>Energia</dt>
-                  <dd>{selectedCard.energy}</dd>
+                  <dd>{interactionMode === "erase" ? "recupera" : selectedCard.energy}</dd>
                 </div>
                 <div>
                   <dt>Populacao</dt>
-                  <dd>{selectedCard.population}</dd>
+                  <dd>{interactionMode === "erase" ? "remove" : selectedCard.population}</dd>
                 </div>
               </dl>
             </div>
@@ -499,6 +638,28 @@ function App() {
                 <i className="legend-dot is-placed"></i>
                 sua
               </span>
+            </div>
+          </section>
+
+          <section className="sidebar-card">
+            <h2>Saude da cidade</h2>
+            <div className="health-grid">
+              <article>
+                <span>Economia</span>
+                <strong>{resources.economyStatus}</strong>
+              </article>
+              <article>
+                <span>Energia</span>
+                <strong>{resources.energyStatus}</strong>
+              </article>
+              <article>
+                <span>Total no mapa</span>
+                <strong>{resources.totalBuildings}</strong>
+              </article>
+              <article>
+                <span>Modo atual</span>
+                <strong>{interactionMode === "build" ? "Construindo" : "Apagando"}</strong>
+              </article>
             </div>
           </section>
 
@@ -537,6 +698,33 @@ function App() {
                 <span>Energia</span>
                 <strong>{resources.totalEnergy}</strong>
               </article>
+            </div>
+          </section>
+
+          <section className="sidebar-card">
+            <h2>Atalhos</h2>
+            <div className="shortcut-list">
+              <span>
+                <kbd>1</kbd> paleta urbana
+              </span>
+              <span>
+                <kbd>2</kbd> paleta fantasy
+              </span>
+              <span>
+                <kbd>V</kbd> troca a camera
+              </span>
+              <span>
+                <kbd>G</kbd> liga ou desliga o grid
+              </span>
+              <span>
+                <kbd>D</kbd> mostra ou esconde decoracao
+              </span>
+              <span>
+                <kbd>X</kbd> alterna construir e apagar
+              </span>
+              <span>
+                <kbd>Ctrl</kbd> + <kbd>Z</kbd> desfaz
+              </span>
             </div>
           </section>
 
