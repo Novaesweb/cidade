@@ -1,4 +1,14 @@
-export type BuildType = "house" | "road" | "factory";
+export type BuildType =
+  | "house"
+  | "road"
+  | "factory"
+  | "townCenter"
+  | "market"
+  | "barracks"
+  | "watchTower"
+  | "windmill"
+  | "temple"
+  | "farm";
 
 export type BuildingPlacement = {
   x: number;
@@ -42,36 +52,36 @@ export const TREES = [
 ];
 
 export const LAMP_POSTS = [
-  { x: 6, z: 7 },
-  { x: 10, z: 7 },
-  { x: 7, z: 10 },
-  { x: 9, z: 12 },
+  { x: 3, z: 7 },
+  { x: 13, z: 7 },
+  { x: 7, z: 13 },
+  { x: 12, z: 12 },
   { x: 4, z: 5 },
 ];
 
 export const BENCHES = [
-  { x: 5, z: 2, rotationY: Math.PI / 2 },
-  { x: 12, z: 9, rotationY: 0 },
+  { x: 1, z: 4, rotationY: Math.PI / 2 },
+  { x: 15, z: 10, rotationY: 0 },
 ];
 
 export const BIKE_RACKS = [
-  { x: 6, z: 2, rotationY: Math.PI / 2 },
-  { x: 11, z: 9, rotationY: Math.PI / 2 },
+  { x: 2, z: 4, rotationY: Math.PI / 2 },
+  { x: 14, z: 10, rotationY: Math.PI / 2 },
 ];
 
 export const STOP_SIGNS = [
-  { x: 7, z: 8, rotationY: 0 },
-  { x: 8, z: 7, rotationY: Math.PI / 2 },
+  { x: 3, z: 8, rotationY: 0 },
+  { x: 8, z: 14, rotationY: Math.PI / 2 },
 ];
 
 export const TRASH_CANS = [
-  { x: 5, z: 4, rotationY: 0 },
-  { x: 10, z: 11, rotationY: 0 },
+  { x: 3, z: 5, rotationY: 0 },
+  { x: 13, z: 11, rotationY: 0 },
 ];
 
 export const FIRE_HYDRANTS = [
-  { x: 9, z: 7, rotationY: 0 },
-  { x: 3, z: 6, rotationY: 0 },
+  { x: 2, z: 6, rotationY: 0 },
+  { x: 14, z: 9, rotationY: 0 },
 ];
 
 const RESERVED_CELL_KEYS = new Set(

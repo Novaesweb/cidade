@@ -8,7 +8,7 @@ import {
 } from "./components/cityBuilderConfig";
 import "./App.css";
 
-const STORAGE_KEY = "cidade-builder-placements-v1";
+const STORAGE_KEY = "cidade-builder-placements-v2";
 const CityBuilderScene = lazy(() =>
   import("./components/CityBuilderScene").then((module) => ({
     default: module.CityBuilderScene,
@@ -28,7 +28,7 @@ const BUILDING_CATALOG: Record<
 > = {
   house: {
     label: "Casa",
-    description: "Expande bairros e aumenta a população trabalhadora.",
+    description: "Expande bairros e aumenta a populacao trabalhadora.",
     cost: 80,
     income: 12,
     energy: -2,
@@ -43,14 +43,83 @@ const BUILDING_CATALOG: Record<
     population: 0,
   },
   factory: {
-    label: "Fábrica",
-    description: "Produz recursos e impulsiona a economia da cidade.",
+    label: "Fabrica",
+    description: "Produz recursos e puxa a economia da cidade moderna.",
     cost: 160,
     income: 36,
     energy: -8,
     population: 0,
   },
+  townCenter: {
+    label: "Town Center",
+    description: "Centro principal do assentamento fantasy RTS.",
+    cost: 220,
+    income: 24,
+    energy: -3,
+    population: 12,
+  },
+  market: {
+    label: "Mercado",
+    description: "Cria comercio local e aumenta a circulacao de ouro.",
+    cost: 150,
+    income: 22,
+    energy: -1,
+    population: 2,
+  },
+  barracks: {
+    label: "Quartel",
+    description: "Estrutura militar para o lado RTS da cidade.",
+    cost: 180,
+    income: 8,
+    energy: -4,
+    population: 3,
+  },
+  watchTower: {
+    label: "Torre",
+    description: "Ponto de vigia que marca fronteiras e acesso.",
+    cost: 130,
+    income: 4,
+    energy: -2,
+    population: 1,
+  },
+  windmill: {
+    label: "Moinho",
+    description: "Destaque rural que ajuda a sustentar o distrito.",
+    cost: 140,
+    income: 10,
+    energy: 4,
+    population: 2,
+  },
+  temple: {
+    label: "Templo",
+    description: "Edificio simbolico para a camada fantasy do mapa.",
+    cost: 170,
+    income: 7,
+    energy: -1,
+    population: 4,
+  },
+  farm: {
+    label: "Fazenda",
+    description: "Area produtiva para abrir o mapa e variar os distritos.",
+    cost: 90,
+    income: 8,
+    energy: 1,
+    population: 2,
+  },
 };
+
+const TOOL_ORDER: BuildType[] = [
+  "house",
+  "road",
+  "factory",
+  "townCenter",
+  "market",
+  "barracks",
+  "watchTower",
+  "windmill",
+  "temple",
+  "farm",
+];
 
 function loadSavedPlacements() {
   if (typeof window === "undefined") {
@@ -81,7 +150,7 @@ function App() {
   const [selectedTool, setSelectedTool] = useState<BuildType>("house");
   const [placements, setPlacements] = useState<BuildingPlacement[]>(loadSavedPlacements);
   const [lastAction, setLastAction] = useState(
-    "Escolha uma peça no painel e clique no grid para expandir sua cidade.",
+    "Escolha uma construcao no painel e clique no grid para expandir o mapa.",
   );
 
   useEffect(() => {
@@ -89,28 +158,45 @@ function App() {
   }, [placements]);
 
   const resources = useMemo(() => {
-    const houses = placements.filter((placement) => placement.type === "house").length;
-    const roads = placements.filter((placement) => placement.type === "road").length;
-    const factories = placements.filter((placement) => placement.type === "factory").length;
     const totalCells = GRID_SIZE * GRID_SIZE - RESERVED_CELL_COUNT;
     const occupiedCells = placements.length;
     const freeLots = totalCells - occupiedCells;
 
+    const counts = TOOL_ORDER.reduce<Record<BuildType, number>>((accumulator, type) => {
+      accumulator[type] = placements.filter((placement) => placement.type === type).length;
+      return accumulator;
+    }, {} as Record<BuildType, number>);
+
+    const totalPopulation = placements.reduce(
+      (sum, placement) => sum + BUILDING_CATALOG[placement.type].population,
+      0,
+    );
+    const totalTreasury = placements.reduce(
+      (sum, placement) => sum + BUILDING_CATALOG[placement.type].income,
+      1200,
+    );
+    const totalEnergy = placements.reduce(
+      (sum, placement) => sum + BUILDING_CATALOG[placement.type].energy,
+      90,
+    );
+    const rtsStructures =
+      counts.townCenter +
+      counts.market +
+      counts.barracks +
+      counts.watchTower +
+      counts.windmill +
+      counts.temple +
+      counts.farm;
+
     return {
-      houses,
-      roads,
-      factories,
-      population: houses * BUILDING_CATALOG.house.population,
-      treasury:
-        1200 +
-        houses * BUILDING_CATALOG.house.income +
-        factories * BUILDING_CATALOG.factory.income,
-      energy:
-        90 +
-        houses * BUILDING_CATALOG.house.energy +
-        factories * BUILDING_CATALOG.factory.energy,
+      counts,
       freeLots,
       occupancy: Math.round((occupiedCells / totalCells) * 100),
+      totalPopulation,
+      totalTreasury,
+      totalEnergy,
+      rtsStructures,
+      totalBuildings: occupiedCells,
     };
   }, [placements]);
 
@@ -118,7 +204,7 @@ function App() {
 
   const handlePlaceBuilding = (x: number, z: number) => {
     if (isReservedCell(x, z)) {
-      setLastAction("Esse lote já faz parte da infraestrutura inicial do mapa.");
+      setLastAction("Esse lote ja esta ocupado pela infraestrutura do mapa.");
       return;
     }
 
@@ -129,7 +215,7 @@ function App() {
 
       if (existingPlacement?.type === selectedTool) {
         setLastAction(
-          `${selectedCard.label} já posicionada em ${x + 1}:${z + 1}. Escolha outro lote.`,
+          `${selectedCard.label} ja esta nesse lote ${x + 1}:${z + 1}. Escolha outro.`,
         );
         return currentPlacements;
       }
@@ -140,7 +226,7 @@ function App() {
       );
 
       setLastAction(
-        `${selectedCard.label} colocada no lote ${x + 1}:${z + 1}. Setor pronto para crescer.`,
+        `${selectedCard.label} colocada no lote ${x + 1}:${z + 1}. Vista liberada e area expandida.`,
       );
 
       return [...withoutCurrentCell, nextPlacement];
@@ -149,23 +235,22 @@ function App() {
 
   const handleResetMap = () => {
     setPlacements([]);
-    setLastAction("As construções do jogador foram removidas. O terreno voltou a ficar livre.");
+    setLastAction("As construcoes do jogador foram limpas e o terreno voltou ao estado inicial.");
   };
 
   return (
     <div className="app-shell">
       <header className="app-header">
         <div>
-          <p className="eyebrow">Planejamento Urbano</p>
+          <p className="eyebrow">Planejamento Urbano e RTS</p>
           <h1>Nova Aurora</h1>
           <p className="intro">
-            Um protótipo leve de city builder com mapa low poly, grid de construção e
-            persistência local.
+            Mapa 3D aberto com construcao de cidade moderna e opcoes fantasy RTS no mesmo grid.
           </p>
         </div>
         <div className="summary-chip">
-          <span>Ocupação atual</span>
-          <strong>{resources.occupancy}% do grid</strong>
+          <span>Visao geral</span>
+          <strong>{resources.occupancy}% do grid ocupado</strong>
         </div>
       </header>
 
@@ -174,7 +259,7 @@ function App() {
           <div className="scene-panel__bar">
             <div>
               <h2>Mapa 3D</h2>
-              <p>Arraste para girar, use o scroll para zoom e clique nos lotes para construir.</p>
+              <p>Arraste para girar, use scroll para zoom e clique no grid para construir.</p>
             </div>
             <span className="scene-tag">Grid {GRID_SIZE} x {GRID_SIZE}</span>
           </div>
@@ -183,7 +268,7 @@ function App() {
             fallback={
               <div className="scene-fallback">
                 <strong>Preparando o mapa 3D...</strong>
-                <span>Carregando terreno, grid e ferramentas de construção.</span>
+                <span>Carregando terreno, props e estruturas de construcao.</span>
               </div>
             }
           >
@@ -205,7 +290,7 @@ function App() {
             </div>
 
             <div className="tool-grid">
-              {(Object.keys(BUILDING_CATALOG) as BuildType[]).map((tool) => {
+              {TOOL_ORDER.map((tool) => {
                 const item = BUILDING_CATALOG[tool];
                 return (
                   <button
@@ -238,7 +323,7 @@ function App() {
                   <dd>{selectedCard.energy}</dd>
                 </div>
                 <div>
-                  <dt>População</dt>
+                  <dt>Populacao</dt>
                   <dd>{selectedCard.population}</dd>
                 </div>
               </dl>
@@ -250,35 +335,35 @@ function App() {
             <div className="resource-grid">
               <article>
                 <span>Casas</span>
-                <strong>{resources.houses}</strong>
+                <strong>{resources.counts.house}</strong>
               </article>
               <article>
                 <span>Estradas</span>
-                <strong>{resources.roads}</strong>
+                <strong>{resources.counts.road}</strong>
               </article>
               <article>
-                <span>Fábricas</span>
-                <strong>{resources.factories}</strong>
+                <span>Fabricas</span>
+                <strong>{resources.counts.factory}</strong>
+              </article>
+              <article>
+                <span>Estruturas RTS</span>
+                <strong>{resources.rtsStructures}</strong>
               </article>
               <article>
                 <span>Terreno livre</span>
                 <strong>{resources.freeLots}</strong>
               </article>
               <article>
-                <span>População</span>
-                <strong>{resources.population}</strong>
+                <span>Populacao</span>
+                <strong>{resources.totalPopulation}</strong>
               </article>
               <article>
                 <span>Tesouro</span>
-                <strong>{resources.treasury}</strong>
+                <strong>{resources.totalTreasury}</strong>
               </article>
               <article>
                 <span>Energia</span>
-                <strong>{resources.energy}</strong>
-              </article>
-              <article>
-                <span>Construções</span>
-                <strong>{placements.length}</strong>
+                <strong>{resources.totalEnergy}</strong>
               </article>
             </div>
           </section>
@@ -287,8 +372,8 @@ function App() {
             <h2>Status</h2>
             <p className="status-copy">{lastAction}</p>
             <p className="status-note">
-              As construções do jogador ficam salvas no navegador enquanto este dispositivo
-              continuar usando este projeto.
+              As construcoes ficam salvas no navegador e agora incluem as pecas urbanas e as
+              estruturas do pack fantasy RTS.
             </p>
           </section>
         </aside>

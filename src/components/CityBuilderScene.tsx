@@ -1,6 +1,7 @@
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import { Canvas, type ThreeEvent } from "@react-three/fiber";
 import { useMemo, useState } from "react";
+import { FantasyBuildModel } from "./FantasyBuildModels";
 import {
   BUILD_AREA_SIZE,
   CELL_SIZE,
@@ -193,6 +194,10 @@ function PlacedBuilding({ placement }: { placement: BuildingPlacement }) {
     return <FactoryModel position={position} />;
   }
 
+  if (placement.type !== "house") {
+    return <FantasyBuildModel type={placement.type} position={position} />;
+  }
+
   return <HouseModel position={position} tint="#f59e0b" />;
 }
 
@@ -229,15 +234,17 @@ function SceneWorld({
         shadow-camera-bottom={-24}
       />
 
-      <PerspectiveCamera makeDefault position={[20, 26, 20]} fov={42} />
+      <PerspectiveCamera makeDefault position={[0, 34, 26]} fov={36} />
       <OrbitControls
         enablePan={true}
         enableDamping
         dampingFactor={0.08}
-        minDistance={18}
-        maxDistance={56}
-        minPolarAngle={0.6}
-        maxPolarAngle={1.35}
+        minDistance={24}
+        maxDistance={74}
+        minPolarAngle={0.45}
+        maxPolarAngle={1.05}
+        rotateSpeed={0.75}
+        zoomSpeed={0.8}
         target={[0, 0, 0]}
       />
 

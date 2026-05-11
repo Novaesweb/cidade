@@ -1,6 +1,4 @@
-import { Clone, useFBX } from "@react-three/drei";
-import { useEffect } from "react";
-import type { Object3D } from "three";
+import { useFBX } from "@react-three/drei";
 import {
   BENCHES,
   BIKE_RACKS,
@@ -11,6 +9,7 @@ import {
   TRASH_CANS,
   toWorld,
 } from "./cityBuilderConfig";
+import { NormalizedFbxInstance } from "./NormalizedFbxInstance";
 
 type ScenePropConfig = {
   x: number;
@@ -21,45 +20,21 @@ type ScenePropConfig = {
 type PropClusterProps = {
   items: ScenePropConfig[];
   objectUrl: string;
-  scale: number;
+  targetHeight: number;
   y?: number;
 };
 
-function useShadowReadyModel(objectUrl: string) {
-  const object = useFBX(objectUrl) as Object3D;
-
-  useEffect(() => {
-    object.traverse((child) => {
-      const meshLike = child as Object3D & {
-        isMesh?: boolean;
-        castShadow?: boolean;
-        receiveShadow?: boolean;
-      };
-
-      if (meshLike.isMesh) {
-        meshLike.castShadow = true;
-        meshLike.receiveShadow = true;
-      }
-    });
-  }, [object]);
-
-  return object;
-}
-
-function PropCluster({ items, objectUrl, scale, y = 0 }: PropClusterProps) {
-  const object = useShadowReadyModel(objectUrl);
-
+function PropCluster({ items, objectUrl, targetHeight, y = 0 }: PropClusterProps) {
   return (
     <>
       {items.map((item) => (
-        <group
+        <NormalizedFbxInstance
           key={`${objectUrl}-${item.x}-${item.z}`}
+          objectUrl={objectUrl}
           position={[toWorld(item.x), y, toWorld(item.z)]}
           rotation={[0, item.rotationY ?? 0, 0]}
-          scale={scale}
-        >
-          <Clone object={object} />
-        </group>
+          targetHeight={targetHeight}
+        />
       ))}
     </>
   );
@@ -68,32 +43,32 @@ function PropCluster({ items, objectUrl, scale, y = 0 }: PropClusterProps) {
 export function ImportedCityProps() {
   return (
     <>
-      <PropCluster items={TREES} objectUrl="/city-props/Tree__Tree.fbx" scale={0.75} />
+      <PropCluster items={TREES} objectUrl="/city-props/Tree__Tree.fbx" targetHeight={2.8} />
       <PropCluster
         items={LAMP_POSTS}
         objectUrl="/city-props/StreetLight__StreetLight.fbx"
-        scale={0.72}
+        targetHeight={2.4}
       />
-      <PropCluster items={BENCHES} objectUrl="/city-props/Bench__Bench.fbx" scale={0.82} />
+      <PropCluster items={BENCHES} objectUrl="/city-props/Bench__Bench.fbx" targetHeight={0.6} />
       <PropCluster
         items={BIKE_RACKS}
         objectUrl="/city-props/BikeRack__BikeRack.fbx"
-        scale={0.82}
+        targetHeight={0.7}
       />
       <PropCluster
         items={TRASH_CANS}
         objectUrl="/city-props/TrashCan__TrashCan.fbx"
-        scale={0.78}
+        targetHeight={0.7}
       />
       <PropCluster
         items={STOP_SIGNS}
         objectUrl="/city-props/StopSign__StopSign.fbx"
-        scale={0.78}
+        targetHeight={1.3}
       />
       <PropCluster
         items={FIRE_HYDRANTS}
         objectUrl="/city-props/FireHydrant__FireHydrant.fbx"
-        scale={0.8}
+        targetHeight={0.75}
       />
     </>
   );
