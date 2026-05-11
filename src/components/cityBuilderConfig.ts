@@ -49,12 +49,42 @@ export const LAMP_POSTS = [
   { x: 4, z: 5 },
 ];
 
+export const BENCHES = [
+  { x: 5, z: 2, rotationY: Math.PI / 2 },
+  { x: 12, z: 9, rotationY: 0 },
+];
+
+export const BIKE_RACKS = [
+  { x: 6, z: 2, rotationY: Math.PI / 2 },
+  { x: 11, z: 9, rotationY: Math.PI / 2 },
+];
+
+export const STOP_SIGNS = [
+  { x: 7, z: 8, rotationY: 0 },
+  { x: 8, z: 7, rotationY: Math.PI / 2 },
+];
+
+export const TRASH_CANS = [
+  { x: 5, z: 4, rotationY: 0 },
+  { x: 10, z: 11, rotationY: 0 },
+];
+
+export const FIRE_HYDRANTS = [
+  { x: 9, z: 7, rotationY: 0 },
+  { x: 3, z: 6, rotationY: 0 },
+];
+
 const RESERVED_CELL_KEYS = new Set(
   [
     ...FIXED_ROADS,
     ...FIXED_HOUSES.map(({ x, z }) => ({ x, z })),
     ...TREES,
     ...LAMP_POSTS,
+    ...BENCHES.map(({ x, z }) => ({ x, z })),
+    ...BIKE_RACKS.map(({ x, z }) => ({ x, z })),
+    ...STOP_SIGNS.map(({ x, z }) => ({ x, z })),
+    ...TRASH_CANS.map(({ x, z }) => ({ x, z })),
+    ...FIRE_HYDRANTS.map(({ x, z }) => ({ x, z })),
     { x: 1, z: 5 },
   ].map(({ x, z }) => `${x}:${z}`),
 );

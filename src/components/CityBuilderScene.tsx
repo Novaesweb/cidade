@@ -8,12 +8,11 @@ import {
   FIXED_ROADS,
   GRID_SIZE,
   HALF_GRID,
-  LAMP_POSTS,
-  TREES,
   toWorld,
   type BuildType,
   type BuildingPlacement,
 } from "./cityBuilderConfig";
+import { ImportedCityProps } from "./ImportedCityProps";
 
 type CityBuilderSceneProps = {
   placements: BuildingPlacement[];
@@ -79,36 +78,6 @@ function FactoryModel({ position }: { position: [number, number, number] }) {
       <mesh castShadow receiveShadow position={[-0.46, 2.02, 0.26]}>
         <coneGeometry args={[0.14, 0.24, 8]} />
         <meshStandardMaterial color="#f59e0b" emissive="#f97316" emissiveIntensity={0.4} />
-      </mesh>
-    </group>
-  );
-}
-
-function TreeModel({ position }: { position: [number, number, number] }) {
-  return (
-    <group position={position}>
-      <mesh castShadow receiveShadow position={[0, 0.38, 0]}>
-        <cylinderGeometry args={[0.12, 0.16, 0.76, 8]} />
-        <meshStandardMaterial color="#7c4a22" roughness={1} />
-      </mesh>
-      <mesh castShadow receiveShadow position={[0, 1.08, 0]}>
-        <coneGeometry args={[0.72, 1.4, 7]} />
-        <meshStandardMaterial color="#22c55e" roughness={0.95} />
-      </mesh>
-    </group>
-  );
-}
-
-function LampPostModel({ position }: { position: [number, number, number] }) {
-  return (
-    <group position={position}>
-      <mesh castShadow receiveShadow position={[0, 0.72, 0]}>
-        <cylinderGeometry args={[0.05, 0.06, 1.44, 8]} />
-        <meshStandardMaterial color="#cbd5e1" metalness={0.45} roughness={0.5} />
-      </mesh>
-      <mesh castShadow position={[0, 1.52, 0]}>
-        <sphereGeometry args={[0.12, 12, 12]} />
-        <meshStandardMaterial color="#fde68a" emissive="#fde68a" emissiveIntensity={1.35} />
       </mesh>
     </group>
   );
@@ -283,20 +252,7 @@ function SceneWorld({
         />
       ))}
 
-      {TREES.map((tree) => (
-        <TreeModel
-          key={`tree-${tree.x}-${tree.z}`}
-          position={[toWorld(tree.x), 0, toWorld(tree.z)]}
-        />
-      ))}
-
-      {LAMP_POSTS.map((lamp) => (
-        <LampPostModel
-          key={`lamp-${lamp.x}-${lamp.z}`}
-          position={[toWorld(lamp.x), 0, toWorld(lamp.z)]}
-        />
-      ))}
-
+      <ImportedCityProps />
       <FactoryModel position={[toWorld(1), 0, toWorld(5)]} />
 
       {placements.map((placement) => (
