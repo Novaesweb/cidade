@@ -8,6 +8,9 @@ import {
 } from "./components/cityBuilderConfig";
 import "./App.css";
 
+type Palette = "urban" | "fantasy";
+type ViewMode = "survey" | "build";
+
 const STORAGE_KEY = "cidade-builder-placements-v2";
 const CityBuilderScene = lazy(() =>
   import("./components/CityBuilderScene").then((module) => ({
@@ -24,6 +27,7 @@ const BUILDING_CATALOG: Record<
     income: number;
     energy: number;
     population: number;
+    palette: Palette;
   }
 > = {
   house: {
@@ -33,6 +37,7 @@ const BUILDING_CATALOG: Record<
     income: 12,
     energy: -2,
     population: 6,
+    palette: "urban",
   },
   road: {
     label: "Estrada",
@@ -41,6 +46,7 @@ const BUILDING_CATALOG: Record<
     income: 0,
     energy: 0,
     population: 0,
+    palette: "urban",
   },
   factory: {
     label: "Fabrica",
@@ -49,6 +55,7 @@ const BUILDING_CATALOG: Record<
     income: 36,
     energy: -8,
     population: 0,
+    palette: "urban",
   },
   townCenter: {
     label: "Town Center",
@@ -57,6 +64,7 @@ const BUILDING_CATALOG: Record<
     income: 24,
     energy: -3,
     population: 12,
+    palette: "fantasy",
   },
   market: {
     label: "Mercado",
@@ -65,6 +73,7 @@ const BUILDING_CATALOG: Record<
     income: 22,
     energy: -1,
     population: 2,
+    palette: "fantasy",
   },
   barracks: {
     label: "Quartel",
@@ -73,6 +82,7 @@ const BUILDING_CATALOG: Record<
     income: 8,
     energy: -4,
     population: 3,
+    palette: "fantasy",
   },
   watchTower: {
     label: "Torre",
@@ -81,6 +91,7 @@ const BUILDING_CATALOG: Record<
     income: 4,
     energy: -2,
     population: 1,
+    palette: "fantasy",
   },
   windmill: {
     label: "Moinho",
@@ -89,6 +100,7 @@ const BUILDING_CATALOG: Record<
     income: 10,
     energy: 4,
     population: 2,
+    palette: "fantasy",
   },
   temple: {
     label: "Templo",
@@ -97,6 +109,7 @@ const BUILDING_CATALOG: Record<
     income: 7,
     energy: -1,
     population: 4,
+    palette: "fantasy",
   },
   farm: {
     label: "Fazenda",
@@ -105,6 +118,7 @@ const BUILDING_CATALOG: Record<
     income: 8,
     energy: 1,
     population: 2,
+    palette: "fantasy",
   },
 };
 
@@ -120,6 +134,11 @@ const TOOL_ORDER: BuildType[] = [
   "temple",
   "farm",
 ];
+
+const PALETTE_LABELS: Record<Palette, string> = {
+  urban: "Urbano",
+  fantasy: "Fantasy RTS",
+};
 
 function loadSavedPlacements() {
   if (typeof window === "undefined") {
@@ -146,8 +165,39 @@ function loadSavedPlacements() {
   }
 }
 
+function GridOverview({ placements }: { placements: BuildingPlacement[] }) {
+  const placementKeys = useMemo(
+    () => new Set(placements.map((placement) => `${placement.x}:${placement.z}`)),
+    [placements],
+  );
+
+  return (
+    <div className="grid-overview">
+      {Array.from({ length: GRID_SIZE * GRID_SIZE }, (_, index) => {
+        const x = index % GRID_SIZE;
+        const z = Math.floor(index / GRID_SIZE);
+        const key = `${x}:${z}`;
+        const isPlaced = placementKeys.has(key);
+        const isBlocked = isReservedCell(x, z);
+
+        return (
+          <span
+            key={key}
+            className={`grid-overview__cell${isPlaced ? " is-placed" : ""}${isBlocked ? " is-blocked" : ""}`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 function App() {
   const [selectedTool, setSelectedTool] = useState<BuildType>("house");
+  const [activePalette, setActivePalette] = useState<Palette>("urban");
+  const [viewMode, setViewMode] = useState<ViewMode>("survey");
+  const [showDecorations, setShowDecorations] = useState(true);
+  const [showGrid, setShowGrid] = useState(true);
+  const [history, setHistory] = useState<BuildingPlacement[][]>([]);
   const [placements, setPlacements] = useState<BuildingPlacement[]>(loadSavedPlacements);
   const [lastAction, setLastAction] = useState(
     "Escolha uma construcao no painel e clique no grid para expandir o mapa.",
@@ -156,6 +206,12 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(placements));
   }, [placements]);
+
+  const paletteTools = useMemo(
+    () =>
+      TOOL_ORDER.filter((tool) => BUILDING_CATALOG[tool].palette === activePalette),
+    [activePalette],
+  );
 
   const resources = useMemo(() => {
     const totalCells = GRID_SIZE * GRID_SIZE - RESERVED_CELL_COUNT;
@@ -179,14 +235,6 @@ function App() {
       (sum, placement) => sum + BUILDING_CATALOG[placement.type].energy,
       90,
     );
-    const rtsStructures =
-      counts.townCenter +
-      counts.market +
-      counts.barracks +
-      counts.watchTower +
-      counts.windmill +
-      counts.temple +
-      counts.farm;
 
     return {
       counts,
@@ -195,12 +243,31 @@ function App() {
       totalPopulation,
       totalTreasury,
       totalEnergy,
-      rtsStructures,
+      rtsStructures:
+        counts.townCenter +
+        counts.market +
+        counts.barracks +
+        counts.watchTower +
+        counts.windmill +
+        counts.temple +
+        counts.farm,
       totalBuildings: occupiedCells,
     };
   }, [placements]);
 
   const selectedCard = BUILDING_CATALOG[selectedTool];
+
+  const handleSelectPalette = (palette: Palette) => {
+    setActivePalette(palette);
+
+    if (BUILDING_CATALOG[selectedTool].palette !== palette) {
+      const firstTool = TOOL_ORDER.find((tool) => BUILDING_CATALOG[tool].palette === palette);
+
+      if (firstTool) {
+        setSelectedTool(firstTool);
+      }
+    }
+  };
 
   const handlePlaceBuilding = (x: number, z: number) => {
     if (isReservedCell(x, z)) {
@@ -224,16 +291,39 @@ function App() {
       const withoutCurrentCell = currentPlacements.filter(
         (placement) => placement.x !== x || placement.z !== z,
       );
+      const nextPlacements = [...withoutCurrentCell, nextPlacement];
 
+      setHistory((currentHistory) => [...currentHistory, currentPlacements]);
       setLastAction(
         `${selectedCard.label} colocada no lote ${x + 1}:${z + 1}. Vista liberada e area expandida.`,
       );
 
-      return [...withoutCurrentCell, nextPlacement];
+      return nextPlacements;
+    });
+  };
+
+  const handleUndoPlacement = () => {
+    setHistory((currentHistory) => {
+      const previousPlacements = currentHistory.at(-1);
+
+      if (!previousPlacements) {
+        setLastAction("Nao ha uma acao recente para desfazer.");
+        return currentHistory;
+      }
+
+      setPlacements(previousPlacements);
+      setLastAction("Ultima construcao desfeita e mapa restaurado.");
+      return currentHistory.slice(0, -1);
     });
   };
 
   const handleResetMap = () => {
+    if (placements.length === 0) {
+      setLastAction("O mapa ja esta limpo.");
+      return;
+    }
+
+    setHistory((currentHistory) => [...currentHistory, placements]);
     setPlacements([]);
     setLastAction("As construcoes do jogador foram limpas e o terreno voltou ao estado inicial.");
   };
@@ -245,7 +335,8 @@ function App() {
           <p className="eyebrow">Planejamento Urbano e RTS</p>
           <h1>Nova Aurora</h1>
           <p className="intro">
-            Mapa 3D aberto com construcao de cidade moderna e opcoes fantasy RTS no mesmo grid.
+            Mapa 3D aberto com paletas separadas, camera ajustavel e uma leitura mais clara do
+            grid para construir sem perder a vista.
           </p>
         </div>
         <div className="summary-chip">
@@ -264,6 +355,42 @@ function App() {
             <span className="scene-tag">Grid {GRID_SIZE} x {GRID_SIZE}</span>
           </div>
 
+          <div className="scene-toolbar">
+            <div className="toggle-group">
+              <button
+                type="button"
+                className={`toggle-pill${viewMode === "survey" ? " is-active" : ""}`}
+                onClick={() => setViewMode("survey")}
+              >
+                Vista aberta
+              </button>
+              <button
+                type="button"
+                className={`toggle-pill${viewMode === "build" ? " is-active" : ""}`}
+                onClick={() => setViewMode("build")}
+              >
+                Vista de construcao
+              </button>
+            </div>
+
+            <div className="toggle-group">
+              <button
+                type="button"
+                className={`toggle-pill${showDecorations ? " is-active" : ""}`}
+                onClick={() => setShowDecorations((currentValue) => !currentValue)}
+              >
+                Decoracao {showDecorations ? "on" : "off"}
+              </button>
+              <button
+                type="button"
+                className={`toggle-pill${showGrid ? " is-active" : ""}`}
+                onClick={() => setShowGrid((currentValue) => !currentValue)}
+              >
+                Grid {showGrid ? "on" : "off"}
+              </button>
+            </div>
+          </div>
+
           <Suspense
             fallback={
               <div className="scene-fallback">
@@ -276,6 +403,9 @@ function App() {
               placements={placements}
               selectedTool={selectedTool}
               onPlaceBuilding={handlePlaceBuilding}
+              showDecorations={showDecorations}
+              showGrid={showGrid}
+              viewMode={viewMode}
             />
           </Suspense>
         </section>
@@ -284,13 +414,36 @@ function App() {
           <section className="sidebar-card">
             <div className="sidebar-card__header">
               <h2>Ferramentas</h2>
-              <button type="button" className="ghost-button" onClick={handleResetMap}>
-                Limpar mapa
-              </button>
+              <div className="sidebar-actions">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={handleUndoPlacement}
+                  disabled={history.length === 0}
+                >
+                  Desfazer
+                </button>
+                <button type="button" className="ghost-button" onClick={handleResetMap}>
+                  Limpar
+                </button>
+              </div>
+            </div>
+
+            <div className="palette-switcher">
+              {(Object.keys(PALETTE_LABELS) as Palette[]).map((palette) => (
+                <button
+                  key={palette}
+                  type="button"
+                  className={`palette-button${activePalette === palette ? " is-active" : ""}`}
+                  onClick={() => handleSelectPalette(palette)}
+                >
+                  {PALETTE_LABELS[palette]}
+                </button>
+              ))}
             </div>
 
             <div className="tool-grid">
-              {TOOL_ORDER.map((tool) => {
+              {paletteTools.map((tool) => {
                 const item = BUILDING_CATALOG[tool];
                 return (
                   <button
@@ -327,6 +480,25 @@ function App() {
                   <dd>{selectedCard.population}</dd>
                 </div>
               </dl>
+            </div>
+          </section>
+
+          <section className="sidebar-card">
+            <h2>Visao do grid</h2>
+            <GridOverview placements={placements} />
+            <div className="overview-legend">
+              <span>
+                <i className="legend-dot is-empty"></i>
+                livre
+              </span>
+              <span>
+                <i className="legend-dot is-blocked"></i>
+                fixa
+              </span>
+              <span>
+                <i className="legend-dot is-placed"></i>
+                sua
+              </span>
             </div>
           </section>
 
@@ -372,9 +544,10 @@ function App() {
             <h2>Status</h2>
             <p className="status-copy">{lastAction}</p>
             <p className="status-note">
-              As construcoes ficam salvas no navegador e agora incluem as pecas urbanas e as
-              estruturas do pack fantasy RTS.
+              As construcoes ficam salvas no navegador. Use a paleta urbana para densidade rapida
+              e a fantasy RTS para marcos maiores no terreno.
             </p>
+            <p className="status-note">Acoes disponiveis para desfazer: {history.length}</p>
           </section>
         </aside>
       </main>

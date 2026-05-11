@@ -15,10 +15,15 @@ import {
 } from "./cityBuilderConfig";
 import { ImportedCityProps } from "./ImportedCityProps";
 
+type ViewMode = "survey" | "build";
+
 type CityBuilderSceneProps = {
   placements: BuildingPlacement[];
   selectedTool: BuildType;
   onPlaceBuilding: (x: number, z: number) => void;
+  showDecorations: boolean;
+  showGrid: boolean;
+  viewMode: ViewMode;
 };
 
 function RoadTile({ x, z }: { x: number; z: number }) {
@@ -120,6 +125,7 @@ type BuildSurfaceProps = {
   onHoverChange: (cell: { x: number; z: number } | null) => void;
   onPlaceBuilding: (x: number, z: number) => void;
   selectedTool: BuildType;
+  showGrid: boolean;
 };
 
 function BuildSurface({
@@ -127,6 +133,7 @@ function BuildSurface({
   onHoverChange,
   onPlaceBuilding,
   selectedTool,
+  showGrid,
 }: BuildSurfaceProps) {
   const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
     const x = Math.floor((event.point.x + HALF_GRID) / CELL_SIZE);
@@ -144,7 +151,10 @@ function BuildSurface({
     const x = Math.floor((event.point.x + HALF_GRID) / CELL_SIZE);
     const z = Math.floor((event.point.z + HALF_GRID) / CELL_SIZE);
 
-    if (x < 0 || x >= GRID_SIZE || z < 0 || z >= GRID_SIZE) return;
+    if (x < 0 || x >= GRID_SIZE || z < 0 || z >= GRID_SIZE) {
+      return;
+    }
+
     onPlaceBuilding(x, z);
   };
 
@@ -157,10 +167,12 @@ function BuildSurface({
 
   return (
     <>
-      <gridHelper
-        args={[BUILD_AREA_SIZE, GRID_SIZE, "#1e293b", "#3f6212"]}
-        position={[0, 0.02, 0]}
-      />
+      {showGrid && (
+        <gridHelper
+          args={[BUILD_AREA_SIZE, GRID_SIZE, "#1e293b", "#3f6212"]}
+          position={[0, 0.02, 0]}
+        />
+      )}
 
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
@@ -205,7 +217,10 @@ function SceneWorld({
   placements,
   selectedTool,
   onPlaceBuilding,
-}: Omit<CityBuilderSceneProps, "selectedTool"> & { selectedTool: BuildType }) {
+  showDecorations,
+  showGrid,
+  viewMode,
+}: CityBuilderSceneProps) {
   const [hoveredCell, setHoveredCell] = useState<{ x: number; z: number } | null>(null);
 
   const roadTiles = useMemo(
@@ -216,10 +231,31 @@ function SceneWorld({
     [],
   );
 
+  const cameraConfig =
+    viewMode === "survey"
+      ? {
+          position: [0, 42, 28] as [number, number, number],
+          fov: 33,
+          minDistance: 30,
+          maxDistance: 82,
+          minPolarAngle: 0.4,
+          maxPolarAngle: 0.92,
+          target: [0, 0, 0] as [number, number, number],
+        }
+      : {
+          position: [12, 26, 18] as [number, number, number],
+          fov: 38,
+          minDistance: 18,
+          maxDistance: 58,
+          minPolarAngle: 0.55,
+          maxPolarAngle: 1.15,
+          target: [2, 0, 2] as [number, number, number],
+        };
+
   return (
     <>
       <color attach="background" args={["#8ec5ff"]} />
-      <fog attach="fog" args={["#8ec5ff", 36, 78]} />
+      <fog attach="fog" args={["#8ec5ff", 40, 82]} />
       <ambientLight intensity={1.2} />
       <hemisphereLight intensity={0.75} groundColor="#365314" color="#fef3c7" />
       <directionalLight
@@ -234,32 +270,39 @@ function SceneWorld({
         shadow-camera-bottom={-24}
       />
 
-      <PerspectiveCamera makeDefault position={[0, 34, 26]} fov={36} />
+      <PerspectiveCamera
+        key={`camera-${viewMode}`}
+        makeDefault
+        position={cameraConfig.position}
+        fov={cameraConfig.fov}
+      />
       <OrbitControls
-        enablePan={true}
+        key={`controls-${viewMode}`}
+        enablePan
         enableDamping
         dampingFactor={0.08}
-        minDistance={24}
-        maxDistance={74}
-        minPolarAngle={0.45}
-        maxPolarAngle={1.05}
+        minDistance={cameraConfig.minDistance}
+        maxDistance={cameraConfig.maxDistance}
+        minPolarAngle={cameraConfig.minPolarAngle}
+        maxPolarAngle={cameraConfig.maxPolarAngle}
         rotateSpeed={0.75}
         zoomSpeed={0.8}
-        target={[0, 0, 0]}
+        target={cameraConfig.target}
       />
 
       <Terrain />
       {roadTiles}
 
-      {FIXED_HOUSES.map((house) => (
-        <HouseModel
-          key={`fixed-house-${house.x}-${house.z}`}
-          position={[toWorld(house.x), 0, toWorld(house.z)]}
-          tint={house.tint}
-        />
-      ))}
+      {showDecorations &&
+        FIXED_HOUSES.map((house) => (
+          <HouseModel
+            key={`fixed-house-${house.x}-${house.z}`}
+            position={[toWorld(house.x), 0, toWorld(house.z)]}
+            tint={house.tint}
+          />
+        ))}
 
-      <ImportedCityProps />
+      {showDecorations && <ImportedCityProps />}
       <FactoryModel position={[toWorld(1), 0, toWorld(5)]} />
 
       {placements.map((placement) => (
@@ -274,24 +317,17 @@ function SceneWorld({
         onHoverChange={setHoveredCell}
         onPlaceBuilding={onPlaceBuilding}
         selectedTool={selectedTool}
+        showGrid={showGrid}
       />
     </>
   );
 }
 
-export function CityBuilderScene({
-  placements,
-  selectedTool,
-  onPlaceBuilding,
-}: CityBuilderSceneProps) {
+export function CityBuilderScene(props: CityBuilderSceneProps) {
   return (
     <div className="scene-shell">
       <Canvas shadows dpr={[1, 1.5]} gl={{ antialias: true }}>
-        <SceneWorld
-          placements={placements}
-          selectedTool={selectedTool}
-          onPlaceBuilding={onPlaceBuilding}
-        />
+        <SceneWorld {...props} />
       </Canvas>
     </div>
   );
