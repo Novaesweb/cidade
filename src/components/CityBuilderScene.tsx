@@ -17,15 +17,18 @@ import { ImportedCityProps } from "./ImportedCityProps";
 
 type ViewMode = "survey" | "build";
 type InteractionMode = "build" | "erase";
+type HoveredCell = { x: number; z: number };
 
 type CityBuilderSceneProps = {
   placements: BuildingPlacement[];
   selectedTool: BuildType;
   onPlaceBuilding: (x: number, z: number) => void;
+  onHoverCellChange: (cell: HoveredCell | null) => void;
   showDecorations: boolean;
   showGrid: boolean;
   viewMode: ViewMode;
   interactionMode: InteractionMode;
+  canPlaceSelected: boolean;
 };
 
 function RoadTile({ x, z }: { x: number; z: number }) {
@@ -123,13 +126,14 @@ function Terrain() {
 }
 
 type BuildSurfaceProps = {
-  hoveredCell: { x: number; z: number } | null;
-  onHoverChange: (cell: { x: number; z: number } | null) => void;
+  hoveredCell: HoveredCell | null;
+  onHoverChange: (cell: HoveredCell | null) => void;
   onPlaceBuilding: (x: number, z: number) => void;
   selectedTool: BuildType;
   showGrid: boolean;
   interactionMode: InteractionMode;
   occupiedCellKeys: Set<string>;
+  canPlaceSelected: boolean;
 };
 
 function BuildSurface({
@@ -140,6 +144,7 @@ function BuildSurface({
   showGrid,
   interactionMode,
   occupiedCellKeys,
+  canPlaceSelected,
 }: BuildSurfaceProps) {
   const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
     const x = Math.floor((event.point.x + HALF_GRID) / CELL_SIZE);
@@ -171,12 +176,15 @@ function BuildSurface({
       ? hasUserBuilding
         ? "#f87171"
         : "#94a3b8"
-      : selectedTool === "house"
-        ? "#fb923c"
-        : selectedTool === "road"
-          ? "#cbd5e1"
-          : "#93c5fd";
-  const hoverOpacity = interactionMode === "erase" && !hasUserBuilding ? 0.22 : 0.45;
+      : !canPlaceSelected
+        ? "#f87171"
+        : selectedTool === "house"
+          ? "#fb923c"
+          : selectedTool === "road"
+            ? "#cbd5e1"
+            : "#93c5fd";
+  const hoverOpacity =
+    interactionMode === "erase" && !hasUserBuilding ? 0.22 : !canPlaceSelected ? 0.28 : 0.45;
 
   return (
     <>
@@ -230,12 +238,14 @@ function SceneWorld({
   placements,
   selectedTool,
   onPlaceBuilding,
+  onHoverCellChange,
   showDecorations,
   showGrid,
   viewMode,
   interactionMode,
+  canPlaceSelected,
 }: CityBuilderSceneProps) {
-  const [hoveredCell, setHoveredCell] = useState<{ x: number; z: number } | null>(null);
+  const [hoveredCell, setHoveredCell] = useState<HoveredCell | null>(null);
 
   const roadTiles = useMemo(
     () =>
@@ -270,6 +280,11 @@ function SceneWorld({
           maxPolarAngle: 1.15,
           target: [2, 0, 2] as [number, number, number],
         };
+
+  const handleHoverChange = (cell: HoveredCell | null) => {
+    setHoveredCell(cell);
+    onHoverCellChange(cell);
+  };
 
   return (
     <>
@@ -333,12 +348,13 @@ function SceneWorld({
 
       <BuildSurface
         hoveredCell={hoveredCell}
-        onHoverChange={setHoveredCell}
+        onHoverChange={handleHoverChange}
         onPlaceBuilding={onPlaceBuilding}
         selectedTool={selectedTool}
         showGrid={showGrid}
         interactionMode={interactionMode}
         occupiedCellKeys={occupiedCellKeys}
+        canPlaceSelected={canPlaceSelected}
       />
     </>
   );

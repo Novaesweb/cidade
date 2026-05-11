@@ -7,16 +7,20 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          if (id.includes("three/examples")) {
+            return "three-examples";
+          }
+
+          if (id.includes("@react-three/drei")) {
+            return "drei";
+          }
+
           if (id.includes("node_modules/three")) {
             return "three-core";
           }
 
           if (id.includes("@react-three")) {
             return "react-three";
-          }
-
-          if (id.includes("@react-three/drei")) {
-            return "drei";
           }
         },
       },
